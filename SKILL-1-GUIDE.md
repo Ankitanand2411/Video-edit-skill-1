@@ -1,128 +1,76 @@
-# Skill - 1
+# Skill - 1: Video Edit
 
-## What This Skill Does
+Turn raw vertical talking-head clips into a polished Instagram Reel.
 
-Video Edit turns raw vertical talking-head clips into a finished Instagram Reel. It selects the strongest take of each line, removes pauses, creates punch-ins from high-resolution footage, adds captions and motion graphics, and produces a phone-ready video for review.
+The skill picks the best takes, removes pauses, adds captions and motion graphics, and gives you a ready-to-post video. You do not need to use a video editor.
 
-Use it when you have recorded several takes of a short video and want a polished Reel without manually editing in a video editor.
+## What You Need
 
-### What You Receive
+- Vertical phone clips (4K is best)
+- Claude Code
+- A Mac, Windows, or Linux computer
 
-- A clean, edited vertical Reel
-- Captions timed to the spoken words
-- One of three visual styles: **bold**, **cool girl**, or **cool dude**
-- Background cutout effects that can place text behind the speaker
-- Motion graphics, subtle sound design, and safe-zone checks for Instagram
-- A 720p phone copy and a full-quality render
+On the first run, the skill checks your computer and tells you how to install anything missing.
 
-## Before You Start
+## Install
 
-You need a Mac, Windows 10/11 PC, or Linux computer with Claude Code, ffmpeg, Node.js 22+, and Python 3.10+ installed. The skill checks the setup on its first run and tells you how to install anything missing.
-
-For the best result, record vertical 4K clips, keep the camera steady, and repeat lines until you have a take you like.
-
-## Install the Skill
-
-1. Open Claude Code.
-2. Paste the following message:
+Open Claude Code and paste:
 
 ```
 Install this skill for me: https://github.com/Ankitanand2411/Video-edit-skill-1
 ```
 
-3. Once installation finishes, run the command below.
-
-## Main Command
-
-```
-/video-edit
-```
-
-On the first run, the skill asks for your name, Instagram handle, preferred visual style, clips folder, and projects folder. It stores these as your defaults for future edits.
-
-## Commands and Examples
-
-### Edit clips you have just recorded
+## Start an Edit
 
 ```
 /video-edit I just dropped 5 clips in my Downloads folder
 ```
 
-The skill finds the newest clips, transcribes them, chooses the cleanest take for each line, and creates a finished Reel.
+The first time you run it, answer a few setup questions: your name, Instagram handle, preferred look, and where you store clips.
 
-### Choose a different visual style for each section
+## What the Skill Does
 
-```
-/video-edit Use the cool girl look when I say "the cool girl aesthetic", cool dude after that, and bold everywhere else.
-```
+1. Finds and transcribes your clips.
+2. Selects the best take of each line.
+3. Removes dead air and tightens the pacing.
+4. Adds captions, punch-ins, and visual styling.
+5. Checks that text is safe for Instagram Reels.
+6. Renders a phone-ready video and a full-quality version.
 
-The skill changes the styling at the requested points while keeping the edit coherent.
+## Choose a Look
 
-### Edit a specific folder
+- **Bold** — large kinetic words and high-energy captions.
+- **Cool girl** — warm color grade, yellow serif text, and a softer editorial feel.
+- **Cool dude** — dark editorial look with bold serif typography.
 
-```
-/video-edit Edit all the clips in /Users/me/Desktop/product-launch-clips
-```
-
-Use this when your clips are not in your normal downloads folder.
-
-### Give feedback on a completed version
-
-```
-Make the captions larger, remove the pause before "you can get", and make the background less dark.
-```
-
-The skill applies only those requested changes and re-renders a new version.
-
-## How the Workflow Works
-
-1. **Find and transcribe clips** — The skill reviews your clips and creates a transcript with word-level timing.
-2. **Choose the best takes** — Repeated lines are compared and the cleanest complete take is selected.
-3. **Build the edit** — Dead air is removed, pacing is tightened, and punch-ins are added where useful.
-4. **Apply the look** — Captions, colors, typography, cutout effects, and motion graphics are added.
-5. **Check the result** — The render is checked frame by frame to keep important content inside the Instagram Reel safe zone.
-6. **Deliver the video** — You receive a phone-ready copy and a full-quality version, then can ask for revisions.
-
-## Sample Input and Output
-
-### Sample input
-
-Five vertical phone clips of a creator explaining a product feature. The creator repeats the opening line three times, gives the main explanation in two clips, and records a call to action in the final clip.
-
-Example request:
+You can choose one look for the whole video or change it by section:
 
 ```
-/video-edit Turn these five product-demo clips into a 25-second bold Reel. Use the strongest opening take, keep the captions large, and add a punch-in for the call to action.
+/video-edit Use bold for the hook, cool girl for the middle, and cool dude for the ending.
 ```
 
-### Expected output video
+## Ask for Changes
 
-A 9:16 Reel of approximately 25 seconds with:
+After receiving a version, describe exactly what you want changed:
 
-- The best version of the hook at the start
-- Clean joins between each spoken section
-- Large, accurate captions
-- A punch-in during the call to action
-- Bold kinetic words positioned around and behind the speaker where readable
-- Audio balanced for mobile playback
-- A final `.mp4` render ready to post to Instagram
+```
+Make the captions larger, remove the pause before the last line, and make the video brighter.
+```
 
-## GitHub Repository
+The skill updates the edit and creates another version.
 
-Source code, installation files, and documentation are available here:
+## Example
+
+**Input:** Five clips explaining a product feature, with repeated takes of the opening line.
+
+**Command:**
+
+```
+/video-edit Turn these clips into a 25-second bold Reel. Use the best opening take and add a punch-in for the call to action.
+```
+
+**Output:** A 9:16 Instagram-ready `.mp4` with clean cuts, timed captions, a bold visual look, balanced audio, and a final call to action.
+
+## Repository
 
 https://github.com/Ankitanand2411/Video-edit-skill-1
-
-## Updating the Skill
-
-In Claude Code, paste:
-
-```
-Update the video-edit skill from https://github.com/Ankitanand2411/Video-edit-skill-1
-```
-
-Or, if you installed it manually:
-
-```bash
-git -C "$HOME/.claude/skills/video-edit" pull
-```
