@@ -45,7 +45,7 @@ python --version
 
 ## Step 3: Put the skill in place
 
-- [ ] In the Code tab, paste `Install this skill for me: https://github.com/your-account/video-edit-skill` and press Enter. Allow what it asks.
+- [ ] In the Code tab, paste `Install this skill for me: https://github.com/Ankitanand2411/Video-edit-skill-1` and press Enter. Allow what it asks.
 - [ ] Check: in File Explorer, click the address bar, paste `%USERPROFILE%\.claude\skills\video-edit` and press Enter. The folder opens and contains `SKILL.md`.
 
 ## Step 4: Run the machine check by itself

@@ -55,7 +55,7 @@ Open Claude Code: the Code tab in the Claude desktop app, or type `claude` in yo
 Copy-paste this into the chat and hit Enter:
 
 ```
-Install this skill for me: https://github.com/your-account/video-edit-skill
+Install this skill for me: https://github.com/Ankitanand2411/Video-edit-skill-1
 ```
 
 Claude downloads the skill into your skills folder and tells you when it's ready. Takes a few seconds.
@@ -76,7 +76,7 @@ Hit Enter. On your first run, the skill asks your name, your Instagram handle an
 Open Terminal (Mac: `Command + Space`, type Terminal. Windows: Start menu, type PowerShell). Paste this one line and hit Enter (it needs [git](https://git-scm.com/downloads) installed):
 
 ```bash
-git clone https://github.com/your-account/video-edit-skill "$HOME/.claude/skills/video-edit"
+git clone https://github.com/Ankitanand2411/Video-edit-skill-1 "$HOME/.claude/skills/video-edit"
 ```
 
 Then type `claude` to open Claude Code and run `/video-edit`.
@@ -112,7 +112,7 @@ Tips for filming: shoot vertical in 4K if your phone allows (punch-ins stay shar
 Paste this into Claude:
 
 ```
-Update the video-edit skill from https://github.com/your-account/video-edit-skill
+Update the video-edit skill from https://github.com/Ankitanand2411/Video-edit-skill-1
 ```
 
 Or in Terminal / PowerShell: `git -C "$HOME/.claude/skills/video-edit" pull`
