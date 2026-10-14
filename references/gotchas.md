@@ -48,6 +48,19 @@
 - `fromTo` renders its from-state immediately: pass `immediateRender:false` for anything hidden until its time.
 - Heavy backdrop-filter/blur on many elements can make captures go black; keep it to a few.
 
+## Audio
+- Lip sync drifted up to 0.67 s by the end of a 21-cut reel (v1 and v2 of the first storyboard reel): each segment's
+  audio is up to a frame shorter than its video, and joined with the concat demuxer the gaps lived only in the
+  timestamps. Any tool that decodes straight through (ffmpeg filter graphs, HyperFrames' audio mix) dropped them, so
+  the sound ran ahead of the picture by ~30 ms more per cut. Seek-based checks (`-ss`) hid it. assemble.py now pads
+  every segment's audio to its picture length and joins it losslessly (no timestamp gaps anywhere), and
+  check_cuts.py measures lip sync per shot against the original clip with a straight-through decode.
+- Every AAC pass costs fidelity, and a +16 dB loudness boost makes it audible: phone AAC -> cut -> voice -> mix -> phone
+  copy measured 31 dB from the lossless mix; one pass at 320 kbps measured 45 dB. The voice stays lossless
+  (assets/voice.wav) until render.py's single encode; the phone copy copies the audio instead of re-encoding it.
+- FFT noise reduction (afftdn) did not lower the room tone of a boosted phone voice and shifted the audio: not used.
+  The hiss that comes up with the boost is the recording's own (speech-to-noise stays ~30 dB); a closer mic fixes it.
+
 ## Assets / tools
 - Networks with broken IPv6: Python downloads hang in SYN-SENT (Hugging Face's Xet client sat at 0 bytes, then the
   machine rebooted mid-download), while curl and Node fall back. skillenv.prefer_ipv4() sorts IPv4 first;

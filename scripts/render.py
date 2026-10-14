@@ -16,7 +16,7 @@ Why not `HF render` straight to MP4:
 
 Needs build.py to support `--range A B` (writes chunk_<first frame>.html covering [A, B), no audio elements) and to
 write work/reel.json {"reel_dur", "frames", "sfx": [{"name", "t", "dur", "vol"}]} (the template's build.py does both).
-Audio: assets/voice.m4a (assemble.py) + the SFX at their composition gains + an optional music bed
+Audio: assets/voice.wav (assemble.py, lossless; voice.m4a for older projects) + the SFX at their composition gains + an optional music bed
 (assets/music.mp3|m4a|wav, looped, faded, ducked under the voice with a sidechain compressor).
 """
 import glob
@@ -134,7 +134,8 @@ def frames_of(proj, name, total):
 
 def audio_mix(proj, reel, out):
     ff = skillenv.tool('ffmpeg')
-    ins, flt = ['-i', os.path.join(proj, 'assets', 'voice.m4a')], []
+    wav = os.path.join(proj, 'assets', 'voice.wav')   # lossless and frame-exact (assemble.py); the .m4a only on older projects
+    ins, flt = ['-i', wav if os.path.isfile(wav) else os.path.join(proj, 'assets', 'voice.m4a')], []
     for k, s in enumerate(reel['sfx']):
         ins += ['-i', os.path.join(proj, 'assets', 'sfx', f"{s['name']}.mp3")]
         ms = int(round(s['t'] * 1000))
@@ -174,7 +175,7 @@ def main():
                     '-vf', 'scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p',
                     '-c:v', 'libx264', '-preset', 'slow', '-crf', crf, '-profile:v', 'high', '-tune', 'film',
                     '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
-                    '-c:a', 'aac', '-b:a', '192k', '-frames:v', str(total), '-movflags', '+faststart', out], check=True)
+                    '-c:a', 'aac', '-b:a', '320k', '-frames:v', str(total), '-movflags', '+faststart', out], check=True)   # the one lossy audio pass
     n = int(subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries',
                             'stream=nb_read_frames', '-of', 'csv=p=0', out], **skillenv.TEXT).stdout.strip() or 0)
     if n == total and '--keep-frames' not in sys.argv:   # our own intermediates: ~1.4 MB a frame
