@@ -15,10 +15,16 @@ Check it, do not eyeball it: `PY build.py --safe` draws the unsafe area in red (
 - Creator reel cards: 260x462 tiles, white border, slight tilt (-7 / +6 deg), beside the face, @handle pill under each (always credit them).
 
 ## Behind-head words (readability formula)
-Use `scripts/headpos.py` for the head top (y) during the word.
-For a word at font-size S with line-height .9: baseline ~ top + 0.72*S, x-height ~ 0.5*S.
-Target: baseline = head_top + 0.3 * x-height  ->  `top = head_top + 0.15*S - 0.72*S`.
-Example: head top 400, S=220 -> top ~ 275. Smaller words (xl 220) are easier to keep readable than huge 300.
+Use `headpos.json` (scripts/headpos.py) for the head top during the word; the template interpolates it in time.
+Compute from the punch font's real metrics (assets/fonts/metrics.json), not a rule of thumb:
+- A block of line-height LH puts the baseline at `top + k*S`, `k = (LH + ascent - descent) / 2`
+  (DM Serif Display at 1.12: k = .91; Inter Tight 900 at .9: k = .81; Instrument Serif italic at 1.0: k = .84).
+- Target: baseline = head top + 0.2 * x-height * S, so the hair covers at most the bottom fifth of the lowercase:
+  `top = head_top + (0.2 * xh - k) * S`  (DM Serif: top = head_top - .81 S).
+- The caption line above must clear the ascenders (~1.05 * cap height above the baseline) by ~24px; when the head is
+  high (close-ups, leaning in) shrink S rather than push the caption above y 228.
+- Width: sum of the advances (+ tracking) * S must stay under ~960px.
+The old `.72 * S` rule assumed line-height .9 and sank DM Serif words ~35px into the hair ("li_es", "typ_g").
 If the head moves a lot during the word (leaning in), put the word in front over the chest instead.
 
 ## Cut timing

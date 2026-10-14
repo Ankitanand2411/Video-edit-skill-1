@@ -320,6 +320,9 @@ def hyperframes_env(node=None, ffmpeg=None, environ=None, pathsep=os.pathsep, di
             parts = [d] + [p for p in parts if p != d]
     env[key] = pathsep.join(parts)
     env.setdefault('HYPERFRAMES_NO_TELEMETRY', '1')
+    # onnxruntime-node's install script otherwise pulls ~400 MB of CUDA binaries from GitHub on Linux x64 (hours on a
+    # slow link); the cutout never uses them (HyperFrames needs HYPERFRAMES_CUDA=1 + a CUDA build for that)
+    env.setdefault('ONNXRUNTIME_NODE_INSTALL_CUDA', 'skip')
     return env
 
 
@@ -340,3 +343,71 @@ def hyperframes_command(args):
 def run_hyperframes(args, cwd=None):
     argv, env = hyperframes_command(args)
     return subprocess.run(argv, cwd=cwd, env=env).returncode
+
+
+# ------------------------------------------------------------------ downloads (models), robust to slow / broken networks
+U2NET = {   # the model HyperFrames' remove-background loads; fetched here so the cutout never waits on a slow link
+    'path': os.path.join(os.path.expanduser('~'), '.cache', 'hyperframes', 'background-removal', 'models', 'u2net_human_seg.onnx'),
+    'md5': 'c09ddc2e0104f800e3e1bb4652583d1f',   # rembg's published checksum
+    'urls': ['https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx',
+             'https://huggingface.co/tomjackson2023/rembg/resolve/main/u2net_human_seg.onnx'],
+}
+
+
+def prefer_ipv4():
+    """Sort IPv4 addresses first for every lookup in this process. Some networks hang forever (SYN-SENT) on IPv6 to
+    CDNs, and Python, unlike curl or Node, does not fall back."""
+    import socket
+    if getattr(socket, '_skill_v4', False):
+        return
+    real = socket.getaddrinfo
+
+    def gai(*a, **k):
+        return sorted(real(*a, **k), key=lambda r: r[0] != socket.AF_INET)
+    socket.getaddrinfo, socket._skill_v4 = gai, True
+
+
+def download(urls, dest, md5=None, min_rate=150_000, grace=20, say=print):
+    """Fetch the first mirror that keeps up (>= min_rate bytes/s once `grace` seconds have passed) and matches md5.
+    Writes dest.part first, so a broken download never looks finished. -> True when dest is in place."""
+    import hashlib
+    import time
+    import urllib.request
+    prefer_ipv4()
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    tmp = dest + '.part'
+    for url in urls:
+        h, n, t0 = hashlib.md5(), 0, time.time()
+        try:
+            with urllib.request.urlopen(url, timeout=30) as r, open(tmp, 'wb') as fh:
+                while True:
+                    chunk = r.read(1 << 20)
+                    if not chunk:
+                        break
+                    fh.write(chunk); h.update(chunk); n += len(chunk)
+                    el = time.time() - t0
+                    if el > grace and n / el < min_rate:
+                        raise IOError(f'{n / el / 1000:.0f} KB/s')
+        except Exception as e:   # slow, offline, blocked: next mirror
+            say(f'        {url.split("/")[2]}: {e}')
+            continue
+        if md5 and h.hexdigest() != md5:
+            say(f'        {url.split("/")[2]}: checksum mismatch, ignored')
+            continue
+        os.replace(tmp, dest)
+        return True
+    if os.path.isfile(tmp):
+        os.remove(tmp)   # our own partial download
+    return False
+
+
+def whisper(name, **kw):
+    """faster-whisper model, offline first (no network call once cached); a first download goes IPv4-first and
+    without the Xet transfer client (it stalled at 0 bytes on a network with broken IPv6)."""
+    from faster_whisper import WhisperModel
+    try:
+        return WhisperModel(name, compute_type='int8', local_files_only=True, **kw)
+    except Exception:
+        prefer_ipv4()
+        os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
+        return WhisperModel(name, compute_type='int8', **kw)

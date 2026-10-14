@@ -2,6 +2,7 @@
 """Head top / head x-span / body box per segment, read from the cutout alpha (assets/subject.webm).
 
 Usage:  PY headpos.py <project_dir>      (PY = the skill's Python; needs Pillow)
+Also writes <project>/headpos.json {segment id: [head top at 20%, 50%, 80% of the shot]}.
 Use it to place behind-head words (baseline ~30% of the x-height below the head top, see references/layout.md),
 orbit rings, and cards that must not cover the face. Coordinates are in the 1080x1920 frame.
 """
@@ -23,9 +24,10 @@ with open(os.path.join(proj, 'segments.json'), encoding='utf-8') as fh:
 alpha = os.path.join(proj, 'work', 'alpha')
 subject = os.path.join(proj, 'assets', 'subject.webm')
 os.makedirs(alpha, exist_ok=True)
+result = {}   # segment id -> head top at 20% / 50% / 80% of the shot
 for s in segs:
     t0, d = s['frame'] / 30, s['frames'] / 30
-    rows = []
+    rows, tops = [], []
     for k, f in enumerate((.2, .5, .8)):
         png = os.path.join(alpha, f"{skillenv.safe_name(s['id'])}_{k}.png")
         subprocess.run([FF, '-loglevel', 'error', '-y', '-c:v', 'libvpx-vp9', '-ss', f'{t0 + d * f:.2f}',
@@ -39,4 +41,8 @@ for s in segs:
         xs = [x for x in range(w) if px[x, min(h - 1, top + 25)] > 128]
         bb = im.point(lambda v: 255 if v > 128 else 0).getbbox()
         rows.append(f"head top {top * 4:4d}  head x {xs[0] * 4}-{xs[-1] * 4}  body {[v * 4 for v in bb]}")
+        tops.append(top * 4)
+    result[s['id']] = tops if len(tops) == 3 else None
     print(f"{s['id']:8s} {t0:6.2f}s  " + ' | '.join(rows))
+with open(os.path.join(proj, 'headpos.json'), 'w', encoding='utf-8') as fh:   # build.py reads this
+    json.dump(result, fh, indent=1)

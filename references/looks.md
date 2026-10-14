@@ -1,6 +1,9 @@
 # Looks (exact values)
 
-All three live in `assets/template/build.py`. Accent everywhere: butter yellow `#FAE67A`.
+All three are presets in `assets/template/build.py` (`LOOK = 'dude' | 'girl' | 'bold'`): grade, overlays, caption
+font / case / tracking / entrance, punch font / size / entrance, and cut motion (push-ins or punches). The first
+reel's multi-look build (orbit, creator cards, IG insert) is `assets/examples/first-reel-build.py`.
+Accent everywhere: butter yellow `#FAE67A`.
 The user's default look is in `config.json` (`defaultLook`); a line in the script that names a look
 ("you can get the cool girl aesthetic like this") switches that section to it.
 
@@ -28,6 +31,12 @@ Inspired by high-end studio interview edits: dark room, lit subject, tiny tracke
 - Motion: serif letters rise from a mask (`yPercent 115 -> 0`, stagger .028, expo.out) with a blur/scale settle; tracked words "track in" via `scaleX 1.45 -> 1` + blur (NOT letterSpacing, lint rejects it); quick .45s blur-to-focus into the section; slow push-ins (scale 1 -> 1.05 across a shot) instead of cut punches; one soft light sweep (screen blend) when the section opens.
 - Shots: wide, then a ~1.9x close-up cropped from the 4K original (alternate wide/close like a studio interview).
 - Tried and dropped: replacing the room with an AI-generated background (looked fake), black and white, crushed-dark grades, film grain.
+- With a storyboard asking for "vibrant, inspirational": keep the look, lift it: room `contrast(1.08) saturate(.92)
+  brightness(.86)`, subject `contrast(1.05) saturate(.98) brightness(1.0)` (the template's dude preset); the warm
+  storyboard pictures carry the colour against the cool room.
+- Running captions in this look: every spoken word in tracked caps (34px, ~23 characters a line, balanced by
+  measured width), in the wall space above the head; the punch words are pulled out of the line and set behind
+  the head. One punch per shot, two on shots over ~4s.
 
 ## Fonts on hand (assets/template/assets/fonts, latin woff2 + fonts.css, SIL Open Font License)
 Inter 500/600, Inter Tight 800/900, Instrument Serif italic, DM Serif Display (+italic), Montserrat 500/600, JetBrains Mono 500, Caveat 600.
