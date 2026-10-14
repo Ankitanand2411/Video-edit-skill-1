@@ -37,6 +37,16 @@ The first time you run it, answer a few setup questions: your name, Instagram ha
 5. Checks that text is safe for Instagram Reels.
 6. Renders a phone-ready video and a full-quality version.
 
+## Edit from a Storyboard
+
+Put your raw clip(s) and your storyboard spreadsheet (.xlsx) in one folder, then:
+
+```
+/video-edit edit the clip in "~/Desktop/My reel" with the storyboard, cool dude style
+```
+
+The storyboard needs one row per scene: a `SCENE` column, a `STORYBOARD` column with `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and the scene's picture placed in that row. The skill puts each picture on screen as a sharp card while you talk (never upscaled), turns the supers into on-screen titles, builds a split screen for "A vs. B", and ends on a card with the last super. Add an mp3 to the folder for a music bed.
+
 ## Choose a Look
 
 - **Bold** — large kinetic words and high-energy captions.

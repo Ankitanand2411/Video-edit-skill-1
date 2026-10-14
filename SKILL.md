@@ -1,16 +1,17 @@
 ---
 name: video-edit
-description: "Turns raw 9:16 talking-head clips into a finished, premium Instagram reel end to end: picks the cleanest take of every line across your clips, cuts dead air, punches in from 4K, cuts you out of the background for words behind your head, applies one of three designed looks (bold kinetic words, cool girl, cool dude), builds animated UI inserts with parallel sub-agents, adds subtle sound design, and checks every cut frame by frame inside the Reels safe zone. Trigger with /video-edit or phrases like 'edit these clips', 'I dropped clips in my downloads', 'cut this into a reel', 'make this reel look fire'."
+description: "Turns raw 9:16 talking-head clips into a finished, premium Instagram reel end to end: picks the cleanest take of every line across your clips, cuts dead air, punches in, cuts you out of the background for words behind your head, applies one of three designed looks (bold kinetic words, cool girl, cool dude), lays a storyboard spreadsheet on the edit (its pictures as full-quality cutaways, its supers, an end card), builds animated UI inserts with parallel sub-agents, adds subtle sound design, renders losslessly and checks every cut frame by frame inside the Reels safe zone. Trigger with /video-edit or phrases like 'edit these clips', 'edit the video in this folder', 'here is the storyboard', 'cut this into a reel', 'make this reel look fire'."
 ---
 
 # /video-edit
 
-Raw clips in, finished reel out. The user never opens an editor: they review a phone copy and give notes; every
-round is a ~2 minute re-render.
+Raw clips in, finished reel out. The user never opens an editor: they review a phone copy and give notes.
+A folder with the raw clip(s) and a storyboard (.xlsx) is enough to get the finished reel: see Storyboard mode.
 
 Read before building: `references/looks.md` (the three looks, exact values), `references/layout.md` (safe zone,
 placement, behind-head formula), `references/gotchas.md` (every trap already hit once). Read
-`references/overlays.md` when the script calls for an animated insert.
+`references/storyboard.md` when the folder has a storyboard, `references/overlays.md` when the script calls for an
+animated insert.
 
 Works on macOS, Linux and Windows. setup.py detects the machine at the start of every run and every command below
 comes from that record, so never guess paths or shells: see "This machine" right after Step 0.
@@ -46,6 +47,8 @@ and go to Step 1 once it prints READY.
      terms the first time), then quits Claude Code completely and reopens it, or the new programs are not found.
    - The script downloads the 6 sound effects itself. If it still reports them MISSING (offline), that is optional:
      the reel just has no SFX until they are added.
+   - It also fetches the models (Whisper small.en, the background-removal model) IPv4-first with a mirror fallback,
+     so no edit stalls on a download later. MISSING there is not fatal: the first transcription / cutout retries.
 4. Optional, Apify (pulls reels and profile stats automatically): try a simple Apify MCP call. If it is not
    connected, say it is optional and how to add it:
    1. Create a free account at https://apify.com and copy the API token from Settings > API & Integrations.
@@ -96,8 +99,13 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
 ## Workflow
 
 ### 1. Intake
-- Clips: the files the user names, else the newest video files in `clipsDir`. Create `<projectsDir>/<short-slug>/`.
+- Clips: the files or folder the user names, else the newest video files in `clipsDir`. Create the project as
+  `<projectsDir>/<short-slug>/` (when the user names a folder for the work, the project goes inside that folder).
   (`~` in config.json is the user's home folder, `C:/Users/<name>` on Windows. The skill's scripts expand it.)
+- **Storyboard mode**: a `.xlsx` storyboard in that folder (or one the user attaches) -> read
+  `references/storyboard.md`, copy it into the project and run `PY SK/scripts/storyboard.py <project> <file.xlsx>`
+  (storyboard.json + its pictures, untouched). Read every scene and LOOK at every picture before cutting.
+  An audio file in the folder (mp3/m4a/wav) is a music bed: copy it to `<project>/assets/music.<ext>`.
 - Reference links (IG reels, Pinterest pins) for a style: download them and look at frames before designing anything
   (see overlays.md for how to fetch them).
 
@@ -105,27 +113,39 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
 ```bash
 PY SK/scripts/ingest.py <project> <clips or folder> [--newest 5]
 ```
-Look at `work/sheets.jpg` (setups and angles) and read `transcript.txt` (per-clip lines, words with times, speech map).
+Look at `work/sheets.jpg` (setups and angles, source resolution) and read `transcript.txt` (per-clip lines, words
+with times, speech map). With a storyboard, its SCRIPT shows the intended order and the names to spell right; the
+captions still follow what was said.
 
 ### 3. Pick takes -> `<project>/edl.json`
 - Rebuild the script from the takes: people repeat a line until it lands. Use the LAST complete clean take unless
   the user says otherwise ("the better section starts at 0:47" means one continuous take from there).
 - In/out points from the speech map: start ~0.05-0.07s before the first word, end at the silence start after the
-  last word. Kill dead air between sections; confirm short pauses with silencedetect before trimming (Whisper can
-  invent a leading word at a cut).
-- Two segments in a row from the same angle: punch one in (zoom 1.3-1.9 from the 4K original, cx/cy on the chest).
+  last word. Kill dead air between sections and false starts; confirm short pauses with silencedetect before
+  trimming (Whisper can invent a leading word at a cut, and it misses fast words like "So I was" before a pause).
+- Two segments in a row from the same angle: alternate wide / close. Close-up zoom depends on the source: 1.9 from
+  4K, 1.5 from 1080p, 1.35 from 720p (more is visibly soft). Keep the eye line level: choose cy so the eyes sit at
+  the same y as in the wide (`cy = (eye_y_src - (0.5 - eye_y_wide) * h_src / zoom) / h_src` with eye_y as fractions);
+  the cut then reads as a push towards the eyes and leaves wall space above the head for type.
+- Ending: keep ~1s after the last word when the speaker holds a look (a reflective beat reads as an ending; it also
+  gives the last punch word time to land). A sign-off spoken too quietly to be heard is cut (tell the user).
+- `line`: exactly what is said in that segment, with punctuation (align.py uses it as the caption text).
 - Unsure words (keyword, CTA trigger): re-transcribe that snippet with medium.en and a prompt containing the names.
-- Format: `[{"id": "hook", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "..."}]`
-- Post the EDL to the user as a short table (line, clip, look per section) and keep going; do not wait.
+- Format: `[{"id": "s01", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "..."}]`
+- Post the EDL to the user as a short table (line, shot, look per section) and keep going; do not wait.
 
-### 4. Assemble, transcribe, cut out
+### 4. Assemble, align, cut out
 ```bash
-PY SK/scripts/assemble.py <project>                 # aroll.mp4 clean 30fps CFR + segments.json with exact frames
-PY SK/scripts/transcribe_cut.py <project> "<names and keywords in the script>"
-PY SK/scripts/cutout.py <project>                   # run in background; asserts cutout frames == aroll frames
-PY SK/scripts/headpos.py <project>                  # after the cutout: head/body position per segment
+PY SK/scripts/assemble.py <project>          # aroll.mp4 (30fps CFR), segments.json, voice.m4a (loudness-normalised)
+PY SK/scripts/align.py <project>             # words.json: per-shot word times, text from the EDL lines
+PY SK/scripts/cutout.py <project>            # run in background; asserts cutout frames == aroll frames
+PY SK/scripts/headpos.py <project>           # after the cutout: headpos.json (head top per shot) for placement
+PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, cutaways, supers, end card)
 ```
-One cutout at a time (about 1.5 GB of RAM). It prints a progress line every 30 seconds.
+One heavy job at a time (Whisper, cutout, render, snapshot each want 1-1.5 GB); on a machine with under 8 GB of
+RAM never overlap them. The cutout prints a progress line every 30 seconds (CPU: ~1 frame/s, so ~30 min per minute
+of reel; start it as soon as the EDL is locked). Re-assembling later (new in/out points) means a new cutout: settle
+the EDL before starting it. Only an appended tail can be cut out alone and spliced on (gotchas.md).
 
 ### 5. Inserts in parallel (as soon as the EDL is locked)
 For each animated insert the script calls for (an app on screen, the profile follow on the CTA, a file scroll),
@@ -133,36 +153,47 @@ spawn a sub-agent in the background with the brief template in `references/overl
 duration, beats locked to the word times, transparent webm out. Keep building the main edit while they work.
 
 ### 6. Build
-Copy `SK/assets/template/` into the project (build.py, hyperframes.json, package.json, assets/fonts, assets/sfx),
-then adapt build.py. It is the finished build of a real reel: keep the machinery, rewrite the content (its
-docstring lists which is which).
-- Which look where: `defaultLook` for the whole reel; a line that names a look switches its section.
-- Orbit and profile grid use the user's own reels (overlays.md: Apify post scraper with their handle, or files they
-  drop into `assets/reels/`).
+Copy `SK/assets/template/` into the project (build.py, hyperframes.json, package.json, assets/fonts with
+metrics.json, assets/sfx). build.py reads everything the scripts wrote; set its CONTENT block:
+- `LOOK`: `defaultLook` unless the user asks ("cool guy" = cool dude). One look for the reel.
+- `PUNCH`: the word that carries each shot (~1 per shot, 2 on shots over ~4s), behind the head. Leave it empty for
+  a first pass: `PY build.py --plan` prints automatic picks (storyboard words, numbers, phrase ends); review them,
+  paste the good ones in and replace the weak ones. Italic for the final word of a thought.
+- `IMPACT`: a number or year among the punch words that deserves the soft bass hit (or None).
+- Storyboard mode: open storyboard_plan.json next to the pictures and fix any cutaway that does not illustrate its
+  line (move a/b to that line's shot); the build places cards, split, plates and end card from it.
+- Multi-look reels, the orbit, creator cards and the Instagram follow insert: borrow the functions from
+  `SK/assets/examples/first-reel-build.py` (the first reel's build; its machinery is documented in its docstring).
 - Iterate from the project folder: `HF lint` (0 errors), then `PY build.py --safe`, then
-  `HF snapshot --at <10-20 moments> --no-end --describe false`. Read the contact sheets, fix layout, readability
-  and safe zone. (`HF` picks the right Node by itself, so there is no `nvm use`.)
-  A build.py copied from an older version of this skill ignores `--safe`: if the red guide is missing from the
-  snapshots, build that project the old way, `SAFE=1 "PY" build.py` (such projects only exist on Mac and Linux).
+  `HF snapshot --at <10-20 moments> --no-end --describe false -o snapshots/vN`. Read the contact sheets, fix layout,
+  readability and safe zone. (`HF` picks the right Node by itself, so there is no `nvm use`.)
 
 ### 7. Render and QA
 ```bash
-PY build.py           # without --safe
-HF render -o renders/<slug>-vN.mp4 --quality high      # ~1.5-2 min for a 25s reel on Apple Silicon
+PY build.py                                        # without --safe (grep the html: rgba(255,0,0,.28) must be 0)
+PY SK/scripts/render.py <project> <slug>-vN        # lossless: PNG frames in short Chrome sessions, one x264 encode
 PY SK/scripts/check_cuts.py <project> renders/<slug>-vN.mp4 --phone
 ```
-Look at `work/cut_check.jpg`: every after-cut frame shows the new shot cleanly. Check audio peaks (`volumedetect`,
-max around -2 to -5 dB) and the silence at section joins.
+render.py, not `HF render`: HyperFrames' MP4 path captures JPEG frames (a second lossy step) and its capture can
+stall for good on machines under 8 GB of RAM. render.py hard-links every captured frame, restarts a stalled session
+at the first missing frame, mixes voice + SFX (+ assets/music.* ducked under the voice) and encodes once (crf 12,
+BT.709). Speed: ~1 frame/s on a CPU-only Linux box (a 65s reel took ~40 min), much faster on Apple Silicon.
+Look at `work/cut_check.jpg` (make a bigger grid when it is too small to judge): every after-cut frame shows the
+new shot cleanly. Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
+Storyboard pictures: crop a card from a render frame and compare it with its display copy (PSNR > 40 dB).
 
 ### 8. Deliver
-Send or point to the phone copy (720p) and the full-quality render. Report in plain terms what changed and anything
-that needs the user's call. Keep every version in `renders/`; back up `assets/` + `segments.json` to `work/vN/` before
-re-assembling.
+Send the files in the chat (SendUserFile): the phone copy (720p) to watch, and the full-quality render when the user
+wants to save or post it. Report in plain terms what changed and anything that needs the user's call (music,
+picture rights, a cut sign-off). Keep every version in `renders/`; back up `assets/` + `segments.json` + the
+EDL / words to `work/vN/` before re-assembling.
 
 ## Defaults that came out of real feedback (do not re-litigate)
 - Change the grade and captions to create a look; do not replace the background with an AI-generated room.
 - No film grain. Dark is fine, but keep the subject lit and skin from going red.
 - Lead-in captions centred in front of the speaker read better than lines pinned to the left edge.
 - Words behind the head are the signature move, but only when readable.
+- Storyboard pictures are cards at native size or smaller over a blurred copy of themselves, never full-bleed
+  upscales. Supers are lower-third plates; a stepped super lights up step by step as the words are said.
 
 ---

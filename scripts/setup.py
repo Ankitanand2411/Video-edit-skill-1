@@ -9,6 +9,7 @@ Run it with whichever Python the machine has:   python3 setup.py   |   python se
      Node is the default)
   3. Python 3.10+ and a venv inside the skill with faster-whisper + Pillow (transcription, head tracking)
   4. Sound effects in assets/template/assets/sfx (not bundled: the Pixabay license forbids redistributing the files)
+  5. Models: Whisper small.en + the background-removal model (scripts/models.py, IPv4-first, mirror fallback)
 
 Prints a STATUS line per item, each with the fix for THIS machine, then READY or NOT READY. Exit code 0 only when
 everything is ready. Writes <skill>/.platform.json (os, arch, the venv Python, how to start npx) so the other
@@ -238,6 +239,11 @@ def main():
     node_ok, node, node_ver, npx = check_node(osn)
     py_ok, py = check_python(info)
     sfx_ok = check_sfx()
+    if py_ok:   # 5. models (optional for READY: the first transcription / cutout would fetch them, slowly)
+        r = subprocess.run([py, os.path.join(skillenv.SKILL_DIR, 'scripts', 'models.py')], **skillenv.TEXT)
+        for line in (r.stdout + r.stderr).splitlines():
+            if line.startswith(('STATUS', '        ')):
+                say(line)
     ready = ff_ok and node_ok and py_ok
 
     sp = skillenv.shell_path

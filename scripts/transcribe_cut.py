@@ -10,7 +10,6 @@ import os
 import subprocess
 import sys
 
-from faster_whisper import WhisperModel
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
@@ -22,7 +21,7 @@ os.makedirs(os.path.join(proj, 'work'), exist_ok=True)
 prompt = sys.argv[2] if len(sys.argv) > 2 else 'Claude, Claude Code, skill.'
 subprocess.run([skillenv.tool('ffmpeg'), '-loglevel', 'error', '-y', '-i', os.path.join(proj, 'assets', 'aroll.mp4'), '-vn', '-ac', '1',
                 '-ar', '16000', wav], check=True)
-m = WhisperModel('medium.en', compute_type='int8')
+m = skillenv.whisper('medium.en')
 s, _ = m.transcribe(wav, word_timestamps=True, vad_filter=False, initial_prompt=prompt)
 ws = [{'text': w.word.strip(), 'start': round(w.start, 3), 'end': round(w.end, 3)} for x in s for w in x.words]
 with open(os.path.join(proj, 'words.json'), 'w', encoding='utf-8') as fh:

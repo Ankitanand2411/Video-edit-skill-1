@@ -14,8 +14,9 @@ Film your talking-head clips on your phone, drop them in a folder, type `/video-
    - **Bold:** kinetic words around you, the big ones behind your head.
    - **Cool girl:** a warm grade with a yellow serif italic, and your own reels orbiting around you.
    - **Cool dude:** a dark editorial grade with tiny spaced capitals and big serif words.
-6. Builds animated inserts in parallel with sub-agents: an app on screen behind you, your Instagram profile getting followed on your call to action, a file scrolling.
-7. Keeps everything inside the Instagram safe zone, checks every cut frame by frame, and hands you a phone-ready copy.
+6. Follows a storyboard if you give it one: each scene's picture appears as a full-quality cutaway while you talk, the on-screen supers become lower-third titles (a "lines → shapes → letters → words" progression lights up word by word), a split screen for "A vs. B", and an end card with the closing line.
+7. Builds animated inserts in parallel with sub-agents: an app on screen behind you, your Instagram profile getting followed on your call to action, a file scrolling.
+8. Keeps everything inside the Instagram safe zone, renders without a lossy intermediate step, checks every cut frame by frame, and hands you a phone-ready copy.
 
 ---
 
@@ -96,6 +97,12 @@ Claude finds them, shows you which take it picked for each line, and sends you t
 ```
 /video-edit use the cool girl look when I say "the cool girl aesthetic", cool dude after that, bold everywhere else
 ```
+
+**A folder with your clip and a storyboard:**
+```
+/video-edit edit the clip in "~/Desktop/My reel" in cool guy style, the storyboard is in the same folder
+```
+Put the raw clip(s) and the storyboard spreadsheet (.xlsx) in one folder. The storyboard needs one row per scene with a `SCENE` column, a `STORYBOARD` column holding `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and the scene's picture placed in that row (any size; it is never upscaled, so bigger pictures look better). Add an mp3 to the folder if you want a music bed under your voice. You get back the finished reel; the project folder is created next to your clips.
 
 **Give notes on a version:**
 ```
