@@ -179,7 +179,7 @@ stall for good on machines under 8 GB of RAM. render.py hard-links every capture
 at the first missing frame, mixes voice + SFX (+ assets/music.* ducked under the voice) and encodes once (crf 12,
 BT.709). Speed: ~1 frame/s on a CPU-only Linux box (a 65s reel took ~40 min), much faster on Apple Silicon.
 Look at `work/cut_check.jpg` (make a bigger grid when it is too small to judge): every after-cut frame shows the
-new shot cleanly. Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
+new shot cleanly. check_cuts.py also prints lip sync per shot against the original clip: it must say LIP SYNC OK. Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
 Storyboard pictures: crop a card from a render frame and compare it with its display copy (PSNR > 40 dB).
 
 ### 8. Deliver

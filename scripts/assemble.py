@@ -6,7 +6,7 @@ Needs <project>/sources.json (from ingest.py) and <project>/edl.json:
   [{"id": "hook", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "Everybody's..."}, ...]
   zoom > 1 = punch-in cropped from the original (sharp when the source is 4K), centred on (cx, cy) as frame fractions.
 Writes segments.json with each segment's first frame in the cut ("frame") and frame count ("frames"), and
-assets/voice.m4a: the cut's audio at a steady -16.5 LUFS (two-pass loudnorm), which the build plays.
+assets/voice.wav (lossless, -16.5 LUFS, frame-exact: what render.py mixes) + assets/voice.m4a (preview copy).
 
 Why the CFR re-encode: ffmpeg concat leaves a 0.033s video start offset and timestamp gaps; `hyperframes remove-background`
 then duplicates frames and the cutout drifts out of sync with the base video by the end. setpts=N/30 fixes it.
@@ -69,41 +69,57 @@ def main():
                         '-c:a', 'pcm_s16le', '-ar', '48000', out], check=True)
         parts.append(out)
         meta.append({**s, 'src_in': s['in'], 'src_out': s['out']})
+    fr = 0
+    for k, m in enumerate(meta):   # exact frame of every segment, counted before joining
+        n = frames(parts[k])
+        m['frame'], m['frames'] = fr, n
+        fr += n
+    # Audio: each segment's sound trimmed / padded with silence to its picture's exact length, then joined (lossless).
+    # A segment's audio is up to a frame shorter than its video; joined as-is the gaps live only in timestamps, and any
+    # tool that decodes straight through drops them: the sound then runs ahead of the picture, ~30 ms more per cut
+    # (0.67 s by the end of a 21-cut reel). Padding here makes the soundtrack continuous and exact for every consumer.
+    wav = os.path.join(work, 'aroll_audio.wav')
+    ins, chain = [], []
+    for k, (p_, m) in enumerate(zip(parts, meta)):
+        ins += ['-i', p_]
+        v = m['frames'] / 30
+        chain.append(f'[{k}:a]asetpts=PTS-STARTPTS,apad=whole_dur={v:.6f},atrim=end={v:.6f}[a{k}]')
+    fc = ';'.join(chain) + ';' + ''.join(f'[a{k}]' for k in range(len(parts))) + f'concat=n={len(parts)}:v=0:a=1[out]'
+    subprocess.run([FF, '-loglevel', 'error', '-y', *ins, '-filter_complex', fc, '-map', '[out]', '-c:a', 'pcm_s24le', '-ar', '48000', wav],
+                   check=True)
     # the list holds bare file names (resolved next to concat.txt), so no drive letters or backslashes end up in it
     concat = os.path.join(work, 'concat.txt')
     with open(concat, 'w', encoding='utf-8', newline='\n') as fh:
         fh.write(''.join(skillenv.concat_entry(os.path.basename(p)) for p in parts))
-    subprocess.run([FF, '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', concat,
-                    '-vf', 'setpts=N/30/TB', '-r', '30', '-fps_mode', 'cfr', '-af', 'asetpts=PTS-STARTPTS',
+    subprocess.run([FF, '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', concat, '-i', wav, '-map', '0:v', '-map', '1:a',
+                    '-vf', 'setpts=N/30/TB', '-r', '30', '-fps_mode', 'cfr',
                     '-c:v', 'libx264', '-crf', '14', '-preset', 'medium', '-g', '30', '-keyint_min', '30', '-pix_fmt', 'yuv420p',
-                    '-c:a', 'aac', '-b:a', '192k', aroll], check=True)
-    fr = 0
-    for k, m in enumerate(meta):
-        n = frames(parts[k])
-        m['frame'], m['frames'] = fr, n
-        fr += n
+                    '-c:a', 'aac', '-b:a', '256k', aroll], check=True)
     with open(os.path.join(proj, 'segments.json'), 'w', encoding='utf-8') as fh:
         json.dump(meta, fh, indent=1)
     for m in meta:
         print(f"frame {m['frame']:4d} ({m['frame'] / 30:6.3f}s) +{m['frames']:3d}f  {m['id']:8s} {m['clip']} {m['in']}-{m['out']}  {m.get('line', '')}")
     total = frames(aroll)
     print(f'total frames {fr} (aroll.mp4 has {total})' + ('' if total == fr else '  << MISMATCH, investigate'))
-    voice(aroll, os.path.join(assets, 'voice.m4a'))
+    voice(wav, os.path.join(assets, 'voice.wav'), os.path.join(assets, 'voice.m4a'))
 
 
-def voice(aroll, out, target=-16.5, peak=-2.0):
-    """assets/voice.m4a: the cut's audio at a steady loudness (two-pass loudnorm, linear: no pumping). Phone mics
-    often record a voice at -34 LUFS (peaks -11 dB); reels want about -16 with peaks near -2. The build plays this
-    file instead of the a-roll's own track."""
+def voice(src, out_wav, out_m4a, target=-16.5, peak=-2.0):
+    """assets/voice.wav: the cut's audio at a steady loudness (two-pass loudnorm, linear: no pumping), LOSSLESS.
+    Phone mics often record a voice at -34 LUFS (peaks -11 dB); reels want about -16 with peaks near -2.
+    scripts/render.py mixes this file and encodes the reel's audio once; every extra AAC pass costs fidelity (four
+    passes measured 31 dB from the lossless mix, one pass 45 dB). assets/voice.m4a is a copy for previews and
+    snapshots only."""
     chain = 'highpass=f=70,acompressor=threshold=-30dB:ratio=2.5:attack=8:release=150:makeup=1'
-    r = subprocess.run([FF, '-hide_banner', '-i', aroll, '-vn', '-af', f'{chain},loudnorm=I={target}:TP={peak}:LRA=9:print_format=json',
+    r = subprocess.run([FF, '-hide_banner', '-i', src, '-vn', '-af', f'{chain},loudnorm=I={target}:TP={peak}:LRA=9:print_format=json',
                         '-f', 'null', '-'], **skillenv.TEXT)
     m = json.loads(r.stderr[r.stderr.rindex('{'):r.stderr.rindex('}') + 1])
     lin = (f"loudnorm=I={target}:TP={peak}:LRA=9:measured_I={m['input_i']}:measured_TP={m['input_tp']}:measured_LRA={m['input_lra']}"
            f":measured_thresh={m['input_thresh']}:offset={m['target_offset']}:linear=true")
-    subprocess.run([FF, '-loglevel', 'error', '-y', '-i', aroll, '-vn', '-af', f'{chain},{lin},aresample=48000', '-c:a', 'aac', '-b:a', '192k',
-                    out], check=True)
-    print(f"voice.m4a: {m['input_i']} LUFS (peak {m['input_tp']} dB) -> {target} LUFS, peak <= {peak} dB")
+    subprocess.run([FF, '-loglevel', 'error', '-y', '-i', src, '-vn', '-af', f'{chain},{lin},aresample=48000', '-c:a', 'pcm_s24le',
+                    out_wav], check=True)
+    subprocess.run([FF, '-loglevel', 'error', '-y', '-i', out_wav, '-c:a', 'aac', '-b:a', '256k', out_m4a], check=True)
+    print(f"voice.wav: {m['input_i']} LUFS (peak {m['input_tp']} dB) -> {target} LUFS, peak <= {peak} dB (voice.m4a: preview copy)")
 
 
 if __name__ == '__main__':

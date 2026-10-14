@@ -7,7 +7,7 @@ Whisper's word times drift on a long cut (0.5-0.8s early by the end of a 60s ree
 Here every segment's audio is transcribed on its own, so each word is anchored to its shot's exact first frame; the
 TEXT comes from edl.json "line" (write what was actually said there, with punctuation: it drives the caption breaks),
 Whisper only supplies the times. Words Whisper did not hear get times interpolated between their neighbours (flagged).
-Each word carries "seg" (its segment id). Reads assets/voice.m4a if present (cleaner levels), else assets/aroll.mp4.
+Each word carries "seg" (its segment id). Reads assets/voice.wav (or voice.m4a, else aroll.mp4).
 """
 import json
 import os
@@ -31,8 +31,7 @@ def main():
         segs = json.load(fh)
     with open(os.path.join(proj, 'edl.json'), encoding='utf-8') as fh:
         edl = {s['id']: s for s in json.load(fh)}
-    src = os.path.join(proj, 'assets', 'voice.m4a')
-    src = src if os.path.isfile(src) else os.path.join(proj, 'assets', 'aroll.mp4')
+    src = next(p for p in (os.path.join(proj, 'assets', n) for n in ('voice.wav', 'voice.m4a', 'aroll.mp4')) if os.path.isfile(p))
     wav = os.path.join(proj, 'work', 'seg.wav')
     os.makedirs(os.path.dirname(wav), exist_ok=True)
     m = skillenv.whisper(model)
