@@ -21,6 +21,14 @@ Kinetic lowercase words placed around the speaker, the big ones tucked BEHIND th
 - Grade: `sepia(.18) saturate(.9) contrast(.93) brightness(1.05) hue-rotate(-5deg)` + warm soft-light overlay + soft warm vignette.
 - Type: small calm lowercase Inter 500 (64px) + one punch line in **Instrument Serif italic** in butter yellow (200px in the top band, 150px for lower blocks so 3 words fit one line). Cream text `#FFF8EF`.
 - Accents: yellow sparkles (✦) twinkling near the italic, optional handwritten note in Caveat 600 with a drawn SVG arrow (strokeDashoffset).
+- In the template (`LOOK = 'girl'`): the punch words are Instrument Serif italic in yellow behind the head; `SPARKLE`
+  puts 2-3 ✦ beside up to 3 of them (None = automatic: words that stay up 1.5s+, 10s apart, the handwritten one
+  first); `SCRIPT_PUNCH` sets a punch word in Caveat 600 cream, written on letter by letter with a yellow underline
+  drawn under it (the head hides the underline's middle: it reads as written on the wall behind them). One per reel,
+  on the word that is about writing or a feeling ("ugly handwriting"), with a soft sparkle sound.
+- Storyboard layer in this look: warm dark room behind the cards (`#1b1411`), supers and split labels in Instrument
+  Serif italic lowercase (the stepped super lights each step yellow), end card's first line cream and the last line
+  yellow italic.
 - No date/time stamps: they read as clutter.
 - Signature move: the creator's own reels orbit them (orbit() in the template). Each reel tile exists twice (back copy below the cutout, front copy above), positions precomputed as GSAP keyframes every 0.1s around an ellipse, autoAlpha swapping at the ring's left/right extremes. Tiles 190x338, cream border. Keep the ring inside the safe zone.
 

@@ -8,7 +8,8 @@ Inputs (written by the skill's scripts, nothing to hand-type):
   segments.json (assemble.py)   words.json (align.py)   headpos.json (headpos.py)   storyboard_plan.json (optional,
   storyboard_plan.py)   assets/aroll.mp4  assets/subject.webm (cutout.py)  assets/voice.m4a (assemble.py)
   assets/fonts/metrics.json (font metrics: placement and line widths are computed, not eyeballed)
-CONTENT to set per reel: LOOK, PUNCH (empty = automatic picks, printed: review them), FIX, IMPACT.
+CONTENT to set per reel: LOOK, PUNCH (empty = automatic picks, printed: review them), FIX, IMPACT, and in the cool
+girl look SCRIPT_PUNCH (a punch word set in handwriting with a drawn underline) and SPARKLE (None = automatic picks).
 MACHINERY (keep): looks, caption lines, behind-head placement, storyboard layer, grades, audio lanes, --range, SAFE_GUIDE.
 
 PY build.py               writes index.html
@@ -32,6 +33,8 @@ PUNCH = [          # (time hint s, spoken word(s), display text, italic): ~1 per
 ]
 FIX = {}           # display fixes for words.json text: {'heard': 'said'} (edl.json lines are the main text source)
 IMPACT = None      # a PUNCH display text that gets a soft bass hit (e.g. a year, a number), or None
+SCRIPT_PUNCH = set()   # cool girl: PUNCH display texts set in Caveat (handwritten, underline drawn on), e.g. {'ugly handwriting'}
+SPARKLE = None     # cool girl: {PUNCH display text: delay s} for the ✦ twinkles; None -> up to 3 words that stay up 1.5s+
 END_HOLD = 3.0     # end card length when the storyboard has one
 
 # ================================================================== MACHINERY
@@ -297,6 +300,17 @@ CARD_MAX_W, CARD_BOTTOM, BORDER = 960, 1140, 5   # card + border stays inside 35
 IMG_SIZE = {}
 
 
+def snap(t):
+    """plan times are rounded to 3 decimals: an edge within 10ms of a cut goes ON the cut (a card hidden at 5.267 with
+    the cut at 5.2647 stayed on the first frame of the next shot)"""
+    c = min(CUTS, key=lambda c: abs(c - t)) if CUTS else t
+    return c if abs(c - t) < .01 else t
+
+
+for _x in CUTAWAYS + SUPERS:
+    _x['a'], _x['b'] = snap(_x['a']), snap(_x['b'])
+
+
 def img_size(src):
     if src not in IMG_SIZE:
         out = subprocess.run([shutil.which('ffprobe') or 'ffprobe', '-v', 'error', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', src],
@@ -340,7 +354,8 @@ def card_html(cid, src, x, y, w, h, z, inner=''):
 
 for _c in CUTAWAYS:   # a punch word gets ~1s on screen before a cutaway covers it (keep >= 2s of cutaway)
     for _p in PUNCHES:
-        if _c['a'] - 1.0 < _p[1] < _c['a'] and _c['b'] - (_p[1] + 1.0) >= 2.0:
+        if (_c['a'] - 1.0 < _p[1] < _c['a'] and _c['b'] - (_p[1] + 1.0) >= 2.0
+                and seg_at(_p[1]) == seg_at(_c['a'] + .02)):   # a word in the previous shot ends at the cut anyway
             _c['a'] = round(_p[1] + 1.0, 3)
 for _c in CUTAWAYS:   # card rectangles, integer pixels, under the caption line of the shot the cutaway opens on
     if _c['kind'] == 'card':
@@ -477,10 +492,92 @@ def end_card():
     for k, line in enumerate(ENDC.get('lines', [])):
         it = k == len(ENDC['lines']) - 1 and len(ENDC['lines']) > 1   # the last line: italic, accent colour
         size = int(min(150, SERIF_W / text_width(line, 1, PU['font_it'] if it else PU['font'], PU['track'], .04)))
-        inner.append(punch_div(f'end-l{k}', line, it or bool(PU['italic']), top, size, 'pw front', YEL if it else None))
+        inner.append(punch_div(f'end-l{k}', line, it or bool(PU['italic']), top, size, 'pw front',
+                               YEL if it else ('#FFF8EF' if L['fx'] == 'girl' else None)))   # girl: only the last line yellow
         tw += punch_in(f'#end-l{k}', END_IN + .55 + .6 * k)
         top += round(size * 1.12)
     return [f'<div id="endc" style="z-index:20">{"".join(inner)}</div>'], tw
+
+
+# ------------------------------------------------------------------ cool girl extras: handwritten punch word, sparkles
+SCRIPT_FONT, SCRIPT_LH = 'Caveat-600-normal', 1.0
+POS = {}   # punch display text -> (top, size, front, font, a, b), filled by core()
+
+
+def script_k():
+    m = METRICS[SCRIPT_FONT]
+    return (SCRIPT_LH + m['ascent'] - m['descent']) / 2, m['x_height'], m['cap_height']
+
+
+def script_behind_head(sid, a, b, text):
+    """behind_head() with Caveat's own metrics"""
+    k, xh, cap = script_k()
+    hd = min(head_at(sid, a), head_at(sid, min(b, a + .6)))
+    fit = SERIF_W / text_width(text, 1, SCRIPT_FONT, 0, .02)
+    clear = (hd - caps_top(sid) - CAP_LH - 24) / (1.05 * cap - .2 * xh)
+    size = int(min(200, fit, clear))
+    return round(hd + (.2 * xh - k) * size), size
+
+
+def script_div(pid, text, top, size):
+    k, xh, cap = script_k()
+    w = round(text_width(text, size, SCRIPT_FONT, 0, .02)) + 30
+    h = round(size * .2)
+    uy = round(k * size + size * .07)   # just under the baseline: the head hides its middle, both ends stay visible
+    path = (f'M6,{h * .62:.0f} C{w * .22:.0f},{h * .2:.0f} {w * .46:.0f},{h * .9:.0f} {w * .7:.0f},{h * .45:.0f} '
+            f'S{w - 34:.0f},{h * .28:.0f} {w - 6:.0f},{h * .5:.0f}')
+    chars = ''.join(f'<span class="ch">{"&nbsp;" if c == " " else c}</span>' for c in text)
+    svg = (f'<svg class="ul" width="{w}" height="{h}" viewBox="0 0 {w} {h}" style="top:{uy}px;margin-left:{-w // 2}px">'
+           f'<path d="{path}" pathLength="1" fill="none" stroke="{YEL}" stroke-width="{max(5, round(size * .045))}" '
+           f'stroke-linecap="round"/></svg>')
+    return f'<div id="{pid}" class="pw script" style="top:{top}px;font-size:{size}px">{chars}{svg}</div>'
+
+
+def script_in(sel, a, n):
+    """written on: letters appear left to right, then the underline is drawn"""
+    return [f"gsap.set('{sel}',{{autoAlpha:0}});", f"gsap.set('{sel} .ch',{{autoAlpha:0}});", f"gsap.set('{sel} path',{{strokeDashoffset:1}});",
+            f"tl.set('{sel}',{{autoAlpha:1}},{a:.3f});",
+            f"tl.fromTo('{sel} .ch',{{autoAlpha:0,y:10,filter:'blur(4px)'}},{{autoAlpha:1,y:0,filter:'blur(0px)',duration:.2,ease:'power2.out',"
+            f"stagger:.032,immediateRender:false}},{a:.3f});",
+            f"tl.fromTo('{sel} path',{{strokeDashoffset:1}},{{strokeDashoffset:0,duration:.45,ease:'power2.inOut',immediateRender:false}},{a + n * .032:.3f});"]
+
+
+def sparkle_picks():
+    """SPARKLE as set, or up to 3 words that stay up 1.5s+ (the handwritten ones first), 10s+ apart"""
+    if SPARKLE is not None:
+        return dict(SPARKLE)
+    up = sorted(((t, p) for t, p in POS.items() if p[5] - p[4] >= 1.5), key=lambda x: (x[0] not in SCRIPT_PUNCH, -(x[1][5] - x[1][4])))
+    picks = {}
+    for t, p in up:
+        if len(picks) < 3 and all(abs(p[4] - POS[q][4]) >= 10 for q in picks):
+            picks[t] = .1 if t in SCRIPT_PUNCH else .05
+    return picks
+
+
+def sparkles():
+    """two or three ✦ twinkle beside the chosen italic words (behind the head with them, or in front over a card)"""
+    back, front, tw = [], [], []
+    n = 0
+    for text, delay in sparkle_picks().items():
+        if text not in POS:
+            continue
+        top, size, is_front, font, a, b = POS[text]
+        w = text_width(text, size, font, PU['track'] if font != SCRIPT_FONT else 0)
+        spots = [(540 + w / 2 + 6, top + size * .02, 58), (540 - w / 2 - 54, top + size * .5, 38), (540 + w / 2 - 30, top - 34, 28)]
+        for k, (x, y, sz) in enumerate(spots):
+            x = max(45, min(1080 - 45 - sz, x))
+            y = max(232, y)
+            sid_ = f'sp{n}'
+            n += 1
+            (front if is_front else back).append(f'<div id="{sid_}" class="spark" style="left:{x:.0f}px;top:{y:.0f}px;font-size:{sz}px;'
+                                                 f'z-index:{12 if is_front else 3}">&#10022;</div>')
+            t = a + delay + .12 + k * .14
+            tw += [f"gsap.set('#{sid_}',{{autoAlpha:0,scale:0}});",
+                   f"tl.fromTo('#{sid_}',{{autoAlpha:0,scale:0,rotation:-40}},{{autoAlpha:1,scale:1,rotation:0,duration:.32,ease:'back.out(2.5)',immediateRender:false}},{t:.3f});",
+                   f"tl.to('#{sid_}',{{scale:.68,duration:.38,yoyo:true,repeat:1,ease:'sine.inOut'}},{t + .32:.3f});"]
+            end = min(b, REEL_DUR) if b < DUR - .01 else (END_IN if ENDC else DUR)
+            tw += [f"tl.to('#{sid_}',{{autoAlpha:0,duration:.14}},{end - .14:.3f});", f"tl.set('#{sid_}',{{autoAlpha:0}},{end:.3f});"]
+    return back, front, tw
 
 
 # ------------------------------------------------------------------ captions + punch words
@@ -506,11 +603,20 @@ def core():
         if win:   # over a cutaway: the word sits in front, under the card
             b = min(b, win['b'])
             size = int(min(150, SERIF_W / text_width(text, 1, PU['font_it'] if it else PU['font'], PU['track'], .04)))
-            front_html.append(punch_div(f's{k}', text, it, win['y'] + win['h'] + 2 * BORDER + 16, size, 'pw front'))
+            top = win['y'] + win['h'] + 2 * BORDER + 16
+            front_html.append(punch_div(f's{k}', text, it, top, size, 'pw front'))
+            POS[text] = (top, size, True, PU['font_it'] if it else PU['font'], a, b)
+            tw += punch_in(f'#s{k}', a)
+        elif text in SCRIPT_PUNCH:   # handwritten word behind the head, underline drawn under it
+            top, size = script_behind_head(sid, a, b, text)
+            back_html.append(script_div(f's{k}', text, top, size))
+            POS[text] = (top, size, False, SCRIPT_FONT, a, b)
+            tw += script_in(f'#s{k}', a, len(text))
         else:
             top, size = behind_head(sid, a, b, text, it)
             back_html.append(punch_div(f's{k}', text, it, top, size))
-        tw += punch_in(f'#s{k}', a)
+            POS[text] = (top, size, False, PU['font_it'] if it else PU['font'], a, b)
+            tw += punch_in(f'#s{k}', a)
         if b >= DUR - .01:
             continue
         if b - a < .8 or at_cut(b) or (win and abs(b - win['b']) < .01):   # short, or ends on a cut: hard out
@@ -554,6 +660,7 @@ def sfx_list():
         if all(abs(t - u) > .8 for u in used):
             out.append(('whoosh-short', t, .2)); used.append(t)
     out += [('pop', c['bottom_t'], .14) for c in CUTAWAYS if c['kind'] == 'split']
+    out += [('sparkle', punch_t(t) + .3, .12) for t in sorted(SCRIPT_PUNCH) if punch_t(t) is not None]   # under the handwriting
     if IMPACT and punch_t(IMPACT) is not None:
         out.append(('impact-bass-1', punch_t(IMPACT) - .03, .16))
     return out
@@ -641,6 +748,26 @@ html,body{{width:1080px;height:1920px;overflow:hidden;background:#000}}
 .plate .ar svg{{display:block}}
 '''
 
+GIRL_CSS = f'''
+/* cool girl: warm room behind the pictures, serif italic plates and labels, sparkles, handwritten punch word */
+.cbg{{background:#1b1411}}
+.cbg.split{{background:radial-gradient(120% 80% at 50% 42%,#4a362c 0%,#261b16 55%,#150f0c 100%)}}
+#endc{{background:#1b1411}}
+.plate{{background:rgba(48,30,22,.52);border:1px solid rgba(255,248,239,.22);color:#FFF8EF;font:italic 400 50px 'Instrument Serif';
+  padding:8px 34px 12px 34px;text-transform:lowercase;box-shadow:0 12px 34px rgba(40,20,10,.35)}}
+.plate .st{{letter-spacing:0}}
+.plate.words .st{{margin:0 .12em}}
+.plate .ar{{vertical-align:8px}}
+.pill{{font:italic 400 40px 'Instrument Serif';letter-spacing:0;text-transform:lowercase;padding:4px 22px 9px 22px;
+  background:rgba(40,26,20,.72);color:#FFF8EF}}
+.spark{{position:absolute;color:{YEL};line-height:1;text-shadow:0 0 18px rgba(250,230,122,.55);transform-origin:50% 50%}}
+.pw.script{{font-family:'Caveat';font-weight:600;font-style:normal;line-height:1;letter-spacing:.02em;color:#FFF8EF;
+  text-shadow:0 10px 34px rgba(60,30,20,.5)}}
+.pw.script .ch{{display:inline-block}}
+.pw.script .ul{{position:absolute;left:50%;overflow:visible;stroke-dasharray:1;filter:drop-shadow(0 4px 10px rgba(60,30,20,.4))}}
+''' if L['fx'] == 'girl' else ''
+CSS += GIRL_CSS
+
 # PY build.py --safe: draws the Instagram safe zone (red = UI covers it) for snapshot checks, never for renders
 SAFE_GUIDE = ('<div style="position:absolute;inset:0;z-index:99;pointer-events:none">'
               '<div style="position:absolute;left:0;right:0;top:0;height:220px;background:rgba(255,0,0,.28)"></div>'
@@ -652,6 +779,9 @@ SAFE_GUIDE = ('<div style="position:absolute;inset:0;z-index:99;pointer-events:n
 
 def build():
     caps_html, back_html, front_html, s_tw = core()
+    if L['fx'] == 'girl':   # cool girl: ✦ beside the chosen words
+        sb_html, sf_html, sp_tw = sparkles()
+        back_html, front_html, s_tw = back_html + sb_html, front_html + sf_html, s_tw + sp_tw
     f_html, f_tw = fx()
     c_html, c_tw = cutaways()
     p_html, p_tw = supers()
@@ -719,6 +849,8 @@ if '--plan' in sys.argv:
     print(('PUNCH (automatic picks, review them):' if not PUNCH else 'PUNCH:'))
     for idx, t, text, it in PUNCHES:
         print(f"  ({t:.2f}, {norm(WORDS[idx[0]]['text'])!r}, {text!r}, {it}),   # {WORDS[idx[0]]['seg']}")
+    if L['fx'] == 'girl':
+        print(f"SPARKLE {'(automatic)' if SPARKLE is None else ''}: {sparkle_picks()}   SCRIPT_PUNCH: {sorted(SCRIPT_PUNCH) or 'none'}")
     for c in CUTAWAYS:
         print(f"cutaway {c['id']:8s} {c['a']:6.2f}-{c['b']:6.2f}  " + (f"{c['w']}x{c['h']} at ({c['x']},{c['y']}) {c['image']}" if c['kind'] == 'card' else 'split'))
 print(f"wrote {OUT}  look {LOOK}  reel {REEL_DUR:.3f}s (a-roll {DUR:.3f}s)  {len(CUTS)} cuts  {len(PUNCHES)} punch words"
