@@ -13,8 +13,13 @@
   `silencedetect` (n=-40dB, d=0.08) before trimming dead air.
 - On a whole 60s cut Whisper's word times drift 0.5-0.8s early by the end (words landed before their own shot, and
   caption lines broke into orphans like "MY" / "AND"). align.py transcribes shot by shot: every word anchored.
-- Whisper drops fast words before a pause ("So I was" said in 0.3s, then a pause): check the first words of every
-  in-point with a loudness envelope (20ms RMS) before trusting an in-point between words.
+- Whisper drops fast words before a pause ("So I was" said in 0.3s, then a pause), and that cuts both ways. The
+  first cool girl reel LOST "So I was": the 0.3s burst before the pause was taken for "So" alone, the in-point went
+  after the pause, and align.py's "5/7 heard" for that shot was waved off as Whisper missing fast words (this very
+  note, misread). The words were not in the shot; the caption even showed them, from hand-made times. A shot's
+  first or last line words missing with nothing heard in their place is the cut, every time, until a transcription
+  of the audio just outside the cut says otherwise. check_edl.py does exactly that before assembling (assemble.py
+  refuses a failing EDL) and align.py exits 1 on it. Never hand-time words Whisper did not hear in their shot.
 
 ## Rendering
 - HyperFrames' MP4 output captures frames as JPEG (q95 at --quality high, q80 on some paths) before encoding: a
@@ -76,6 +81,9 @@
 - Fonts: the bundled woff2 are latin subsets with no arrow glyph (→ renders as a thin fallback dash). Draw arrows
   as inline SVG. assets/fonts/metrics.json has every font's ascent / descent / x-height / cap height / advances:
   compute widths and baselines from it instead of eyeballing.
+- A GPU with its driver but no CUDA 12 runtime (a GTX 1650 without the toolkit): faster-whisper chose "cuda" and
+  died mid-transcription with "libcublas.so.12 is not found". skillenv.whisper() uses the GPU only when cuBLAS and
+  cuDNN load, the CPU otherwise.
 - Node 22+ for HyperFrames, pinned `hyperframes@0.8.34`. Start it with `HF` (`PY "SK/scripts/hf.py" <command>`): it
   puts a Node 22+ first on PATH on any OS (an nvm default of Node 20 otherwise gives "HyperFrames requires Node.js >= 22").
 - Python scripts run in the skill's own venv. Its path differs per OS (`.venv/bin/python` on Mac and Linux,

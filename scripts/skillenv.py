@@ -401,10 +401,38 @@ def download(urls, dest, md5=None, min_rate=150_000, grace=20, say=print):
     return False
 
 
+CUDA_LIBS = {'windows': ('cublas64_12.dll', 'cudnn_ops64_9.dll'), 'other': ('libcublas.so.12', 'libcudnn_ops.so.9')}
+
+
+def pick_device(cuda_count, libs_load):
+    """'cuda' only when there is a GPU AND its CUDA 12 libraries load. A GTX 1650 with the NVIDIA driver but no CUDA
+    toolkit made faster-whisper choose 'auto' -> cuda and die mid-transcription: 'libcublas.so.12 is not found'."""
+    return 'cuda' if cuda_count and libs_load else 'cpu'
+
+
+def whisper_device():
+    try:
+        import ctranslate2
+        count = ctranslate2.get_cuda_device_count()
+    except Exception:
+        return 'cpu'
+    if not count:
+        return 'cpu'
+    import ctypes
+    try:
+        for lib in CUDA_LIBS['windows' if os.name == 'nt' else 'other']:
+            ctypes.CDLL(lib)
+    except OSError:
+        return pick_device(count, False)
+    return pick_device(count, True)
+
+
 def whisper(name, **kw):
     """faster-whisper model, offline first (no network call once cached); a first download goes IPv4-first and
-    without the Xet transfer client (it stalled at 0 bytes on a network with broken IPv6)."""
+    without the Xet transfer client (it stalled at 0 bytes on a network with broken IPv6). Runs on the GPU only when
+    its CUDA libraries are really there (whisper_device), otherwise on the CPU."""
     from faster_whisper import WhisperModel
+    kw.setdefault('device', whisper_device())
     try:
         return WhisperModel(name, compute_type='int8', local_files_only=True, **kw)
     except Exception:
