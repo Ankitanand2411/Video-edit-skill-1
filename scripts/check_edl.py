@@ -57,9 +57,26 @@ def match(want, got, look=4):
     return out
 
 
+def clean(heard):
+    """Whisper splits "old-fashioned" into "old" "-fashioned." and emits bare "-" tokens: glue the first back onto its
+    word, drop tokens with no letters. Takes and returns [str] or [(text, start, end)]."""
+    out = []
+    for h in heard:
+        t = h if isinstance(h, str) else h[0]
+        if not norm(t):
+            continue
+        if out and t.startswith('-'):
+            p = out[-1]
+            out[-1] = p + t if isinstance(p, str) else (p[0] + t, p[1], h[2])
+            continue
+        out.append(h)
+    return out
+
+
 def edges(line_words, heard_words):
     """-> (lead_missing, lead_extra, trail_missing, trail_extra): line words before the first / after the last word
     that was heard, and heard words before / after the matched run"""
+    heard_words = clean(heard_words)
     m = match([norm(w) for w in line_words], [norm(h) for h in heard_words])
     hit = [i for i, k in enumerate(m) if k is not None]
     if not hit:
@@ -81,6 +98,7 @@ def clipped(missing, heard, side, cut):
     """missing = the line's first ('lead') or last ('trail') words the shot does not hold; heard = [(text, start, end)]
     transcribed across the cut (source times). -> [(word, start, end)] of those said just outside it, searched outward
     from the cut so the occurrence nearest to it counts (an earlier sentence may repeat a word)"""
+    heard = clean(heard)
     if side == 'lead':
         words, near = missing[::-1], [h for h in heard if h[1] < cut - .03][::-1]
     else:
@@ -118,9 +136,27 @@ def island_at(isl, t, side):
     return (near[-1] if side == 'lead' else near[0]) if near else None
 
 
-def inside_sound(isl, t):
-    """the speech stretch a cut point falls inside (a word may be clipped), or None when the cut sits in silence"""
-    return next((s for s in isl if s[0] + .03 < t < s[1] - .03), None)
+def inside_sound(isl, t, kind, depth=.15):
+    """the speech stretch an in-point ('in') cuts the start off, or an out-point ('out') cuts the end off, by depth s
+    or more (a word may be clipped). The last few hundredths of a word dying away are not a clipped word: on the first
+    real run 12 of 20 out-points were flagged for 0.04-0.12s of decay."""
+    if kind == 'in':
+        return next((s for s in isl if s[0] + depth <= t < s[1]), None)
+    return next((s for s in isl if s[0] < t <= s[1] - depth), None)
+
+
+def drop_words(heard, a, b, isl, slack=.15):
+    """the words said in a dropped stretch [a, b]: heard across it with context on both sides, kept when their middle
+    is inside the stretch AND they sit on sound that belongs to it (a stretch of sound that starts and ends inside
+    the gap, not the edge of the kept shots' speech). On the first run Whisper filled near-silent gaps with "Thank you
+    for watching!", and the next shot's first word ("and", "writing"), stamped early into the pause, leaked in."""
+    near = [(max(s[0] - slack, a), min(s[1] + slack, b)) for s in isl if s[0] < b - .05 and s[1] > a + .05]
+    keep = []
+    for h in clean(heard):
+        mid = (h[1] + h[2]) / 2
+        if a <= mid <= b and any(min(h[2], z[1]) - max(h[1], z[0]) >= .03 for z in near):
+            keep.append(h)
+    return keep
 
 
 def gaps(edl, clip_len):
@@ -139,6 +175,17 @@ def gaps(edl, clip_len):
         if end and .15 < end - prev_out <= GAP_MAX:
             out.append((clip, round(prev_out, 3), round(end, 3), prev_id, None))
     return out
+
+
+def trim_kept(dropped, before_words, after_words):
+    """drop-report words minus the neighbouring shots' own edge words whose soft start or end spills into the gap
+    ("fingers" | so holding up | "because"). Safe: a line word really cut off fails that shot's own check."""
+    d = list(dropped)
+    nb, na = [norm(w) for w in before_words], [norm(w) for w in after_words]
+    lead = max((n for n in range(1, min(len(d), len(nb)) + 1) if [norm(w) for w in d[:n]] == nb[-n:]), default=0)
+    d = d[lead:]
+    tail = max((n for n in range(1, min(len(d), len(na)) + 1) if [norm(w) for w in d[-n:]] == na[:n]), default=0)
+    return d[:len(d) - tail]
 
 
 # ------------------------------------------------------------------ audio + Whisper
@@ -177,7 +224,7 @@ class Ears:
         a, b = max(0.0, a), min(len(x) / SR, b)
         r, _ = self.model(name or self.name).transcribe(x[int(a * SR):int(b * SR)], word_timestamps=True, vad_filter=False,
                                                         beam_size=5, condition_on_previous_text=False)
-        return [(w.word.strip(), round(a + w.start, 3), round(a + w.end, 3)) for s in r for w in s.words if w.word.strip()]
+        return clean([(w.word.strip(), round(a + w.start, 3), round(a + w.end, 3)) for s in r for w in s.words if w.word.strip()])
 
 
 def check_side(ears, x, isl, seg, words, inside, side):
@@ -253,7 +300,7 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
         if te and not tm:
             notes.append(f"heard after the line's last word: {' '.join(te)!r}")
         for name, t in (('in', seg['in']), ('out', seg['out'])):
-            s = inside_sound(isl[seg['clip']], t)
+            s = inside_sound(isl[seg['clip']], t, name)
             if s:
                 notes.append(f"the {name}-point {t:.2f} sits inside continuous sound {s[0]:.2f}-{s[1]:.2f}: a word may be clipped "
                              f"(nearest silence: {s[0] - .06 if name == 'in' else s[1] + .02:.2f}); fine if you cut between two words on purpose")
@@ -270,7 +317,11 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
     for clip, a, b, before, after in drops:
         if not any(s[0] < b and s[1] > a for s in isl[clip]):
             continue   # silence only
-        said = ' '.join(h[0] for h in ears.hear(audio[clip], a, b)) or '(sound, no words)'
+        lines = {s['id']: s.get('line', '').split() for s in edl}
+        words = [h[0] for h in drop_words(ears.hear(audio[clip], a - 1.0, b + 1.0, 'medium.en'), a, b, isl[clip])]
+        said = ' '.join(trim_kept(words, lines.get(before, []), lines.get(after, [])))
+        if not said:
+            continue   # breaths, room tone
         where = f"between {before} and {after}" if before and after else (f"before {after}" if after else f"after {before}")
         say(f"  {clip} {a:6.2f}-{b:6.2f}  {where:22s} {said}")
     if fails:
