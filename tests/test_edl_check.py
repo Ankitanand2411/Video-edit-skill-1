@@ -83,9 +83,16 @@ class TrailingWords(unittest.TestCase):
 
 class CutPoints(unittest.TestCase):
     def test_a_cut_inside_continuous_sound_is_noticed(self):
+        # "tiny callus on my fingers, so holding up": an out-point at 25.01 would cut the sound mid-stretch
         isl = [(23.76, 26.09)]
-        self.assertEqual(check_edl.inside_sound(isl, 25.01), (23.76, 26.09))
-        self.assertIsNone(check_edl.inside_sound(isl, 26.30))
+        self.assertEqual(check_edl.inside_sound(isl, 25.01, 'out'), (23.76, 26.09))
+        self.assertIsNone(check_edl.inside_sound(isl, 26.30, 'out'))
+
+    def test_a_word_dying_away_is_not_a_clipped_word(self):
+        # first real run: out 19.88 with the sound fading out until 19.92 was flagged (12 of 20 shots looked like that)
+        self.assertIsNone(check_edl.inside_sound([(19.08, 19.92)], 19.88, 'out'))
+        # an in-point cutting "You know," off "maybe" (77.74 inside 77.38-78.18) is worth a note
+        self.assertEqual(check_edl.inside_sound([(77.38, 78.18)], 77.74, 'in'), (77.38, 78.18))
 
     def test_dropped_stretches_between_shots(self):
         edl = [{'id': 's01', 'clip': 'c1', 'in': 2.08, 'out': 3.56}, {'id': 's02', 'clip': 'c1', 'in': 3.97, 'out': 7.67},
@@ -99,6 +106,50 @@ class CutPoints(unittest.TestCase):
     def test_shots_out_of_source_order(self):
         edl = [{'id': 'b', 'clip': 'c1', 'in': 10.0, 'out': 12.0}, {'id': 'a', 'clip': 'c1', 'in': 1.0, 'out': 9.5}]
         self.assertEqual(check_edl.gaps(edl, {}), [('c1', 0.0, 1.0, None, 'a'), ('c1', 9.5, 10.0, 'a', 'b')])
+
+
+class WhisperNoise(unittest.TestCase):
+    def test_split_hyphen_words_are_glued_and_bare_dashes_dropped(self):
+        self.assertEqual(check_edl.clean(['isn\'t', 'really', 'old', '-fashioned.']), ["isn't", 'really', 'old-fashioned.'])
+        self.assertEqual(check_edl.clean([('fingers,', 24.9, 25.0), ('-', 25.0, 25.1)]), [('fingers,', 24.9, 25.0)])
+        self.assertEqual(check_edl.clean([('old', 75.9, 76.1), ('-fashioned.', 76.1, 76.4)]), [('old-fashioned.', 75.9, 76.4)])
+
+    def test_no_extra_word_after_a_hyphenated_last_word(self):
+        lm, le, tm, te = check_edl.edges("isn't really old-fashioned.".split(), ["isn't", 'really', 'old', '-fashioned.'])
+        self.assertEqual((tm, te), ([], []))
+
+    def test_the_dropped_report_keeps_the_words_said_in_the_gap(self):
+        # head of the clip, cut before s01: "So I was" (1.46-1.76), then "actually" belongs to the shot
+        heard = [('So', 1.30, 1.62), ('I', 1.66, 1.80), ('was', 1.86, 1.90), ('actually', 2.14, 2.36)]
+        isl = [(1.46, 1.76), (2.14, 3.92)]
+        self.assertEqual([h[0] for h in check_edl.drop_words(heard, 0.0, 2.08, isl)], ['So', 'I', 'was'])
+
+    def test_whisper_filling_silence_is_not_reported(self):
+        # gap 32.85-33.86 is a pause; Whisper "heard" Thanks for watching! across it
+        heard = [('effort', 32.24, 32.62), ('Thanks', 32.90, 33.30), ('for', 33.30, 33.45), ('watching!', 33.45, 33.80),
+                 ('actually', 33.92, 34.40)]
+        isl = [(30.38, 32.85), (33.92, 35.22)]
+        self.assertEqual(check_edl.drop_words(heard, 32.85, 33.86, isl), [])
+
+    def test_the_next_shots_first_word_does_not_leak_into_the_gap(self):
+        # gap 19.88-20.35 is a pause; "writing" starts the next shot (sound from 20.41) but Whisper stamps it 19.98-20.66
+        heard = [('of', 19.67, 19.87), ('writing', 19.98, 20.66), ('with', 20.66, 20.94)]
+        isl = [(19.08, 19.92), (20.41, 23.15)]
+        self.assertEqual(check_edl.drop_words(heard, 19.88, 20.35, isl), [])
+
+
+class DroppedReport(unittest.TestCase):
+    def test_kept_edge_words_spilling_into_the_gap_are_not_reported(self):
+        got = check_edl.trim_kept(['fingers', 'so', 'holding', 'up'], 'tiny callus on my fingers,'.split(),
+                                  'because I was holding a pen or pencil too much.'.split())
+        self.assertEqual(got, ['so', 'holding', 'up'])
+        self.assertEqual(check_edl.trim_kept(['actually'], 'And apparently all that effort'.split(), 'actually mattered.'.split()), [])
+
+    def test_words_really_dropped_stay(self):
+        # the editor wrote the line to match the clipped audio: "So I was" must show in the report
+        got = check_edl.trim_kept(['So', 'I', 'was'], [], 'actually really curious about handwriting,'.split())
+        self.assertEqual(got, ['So', 'I', 'was'])
+        self.assertEqual(check_edl.trim_kept(['you', 'know.'], 'isnt really old-fashioned.'.split(), 'Maybe it is'.split()), ['you', 'know.'])
 
 
 class WhisperDevice(unittest.TestCase):
