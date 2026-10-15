@@ -89,7 +89,9 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
 1. Everything inside the Reels safe zone: top 220, bottom 450 (nothing below y 1470), sides 35, right 100 from y 1155.
 2. Never cover the face with text or cards. Behind-head words show at least ~70% of each letter.
 3. Captions say what was actually said: fix Whisper's mishearings of names and keywords ("Claude" often comes out
-   as "cloud"/"claws", "skill" as "scale"). No em dashes in on-screen text.
+   as "cloud"/"claws", "skill" as "scale"). No em dashes in on-screen text. A caption never shows a word its shot
+   does not contain: when a line's first or last words are not heard, the cut clipped them. Fix the cut; never give
+   such words hand-made times in words.json.
 4. Sound effects subtle (template `SFX_GAIN = 0.75` of the base volumes), never louder than the voice.
 5. Credit other creators on screen (@handle) whenever their reels appear. Real numbers on the user's own profile;
    anything else (commenters, chat history) is a generic placeholder, never a real person, never fabricated proof.
@@ -122,7 +124,8 @@ captions still follow what was said.
   the user says otherwise ("the better section starts at 0:47" means one continuous take from there).
 - In/out points from the speech map: start ~0.05-0.07s before the first word, end at the silence start after the
   last word. Kill dead air between sections and false starts; confirm short pauses with silencedetect before
-  trimming (Whisper can invent a leading word at a cut, and it misses fast words like "So I was" before a pause).
+  trimming (Whisper can invent a leading word at a cut, and it misses fast words like "So I was" before a pause:
+  a fast burst before a pause is easy to misjudge, "So I was" was once taken for "So" and cut off a line).
 - Two segments in a row from the same angle: alternate wide / close. Close-up zoom depends on the source: 1.9 from
   4K, 1.5 from 1080p, 1.35 from 720p (more is visibly soft). Keep the eye line level: choose cy so the eyes sit at
   the same y as in the wide (`cy = (eye_y_src - (0.5 - eye_y_wide) * h_src / zoom) / h_src` with eye_y as fractions);
@@ -132,12 +135,16 @@ captions still follow what was said.
 - `line`: exactly what is said in that segment, with punctuation (align.py uses it as the caption text).
 - Unsure words (keyword, CTA trigger): re-transcribe that snippet with medium.en and a prompt containing the names.
 - Format: `[{"id": "s01", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "..."}]`
-- Post the EDL to the user as a short table (line, shot, look per section) and keep going; do not wait.
+- Check it: `PY SK/scripts/check_edl.py <project>` (assemble.py runs it first and refuses an EDL that fails). Each
+  shot is transcribed on its own: a line's first or last words that are said just outside the cut fail it, with the
+  in/out point to use instead. Its DROPPED report prints what is said in every stretch the cut leaves out.
+- Post the EDL to the user as a short table (line, shot, look per section) plus what was cut, in the DROPPED report's
+  own words ("cut: 'So I was'", never your summary of it), and keep going; do not wait.
 
 ### 4. Assemble, align, cut out
 ```bash
-PY SK/scripts/assemble.py <project>          # aroll.mp4 (30fps CFR), segments.json, voice.m4a (loudness-normalised)
-PY SK/scripts/align.py <project>             # words.json: per-shot word times, text from the EDL lines
+PY SK/scripts/assemble.py <project>          # check_edl first; aroll.mp4 (30fps CFR), segments.json, voice (normalised)
+PY SK/scripts/align.py <project>             # words.json: per-shot word times; exit 1 if a cut clipped a line's ends
 PY SK/scripts/cutout.py <project>            # run in background; asserts cutout frames == aroll frames
 PY SK/scripts/headpos.py <project>           # after the cutout: headpos.json (head top per shot) for placement
 PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, cutaways, supers, end card)

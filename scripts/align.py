@@ -8,6 +8,10 @@ Here every segment's audio is transcribed on its own, so each word is anchored t
 TEXT comes from edl.json "line" (write what was actually said there, with punctuation: it drives the caption breaks),
 Whisper only supplies the times. Words Whisper did not hear get times interpolated between their neighbours (flagged).
 Each word carries "seg" (its segment id). Reads assets/voice.wav (or voice.m4a, else aroll.mp4).
+Exit 1 when a shot's FIRST or LAST line words are not heard with nothing else heard in their place: that is a cut
+clipping them (the first reel lost "So I was" this way while "5/7 heard" was read as Whisper missing fast words), not
+a Whisper quirk. Never give such words hand-made times in words.json: fix the in/out point (check_edl.py prints it),
+or list them in the segment's "heard_ok" after listening. Words missing in the middle of a line stay a note.
 """
 import json
 import os
@@ -17,6 +21,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
+from check_edl import edges, side_status  # noqa: E402
 
 
 def norm(t):
@@ -35,7 +40,7 @@ def main():
     wav = os.path.join(proj, 'work', 'seg.wav')
     os.makedirs(os.path.dirname(wav), exist_ok=True)
     m = skillenv.whisper(model)
-    out = []
+    out, clipped = [], []
     for s in segs:
         a, d = s['frame'] / 30, s['frames'] / 30
         subprocess.run([skillenv.tool('ffmpeg'), '-v', 'error', '-y', '-ss', f'{a:.3f}', '-t', f'{d:.3f}', '-i', src, '-ac', '1',
@@ -62,9 +67,22 @@ def main():
         for wd, (st, en) in zip(want, times):
             out.append({'text': wd, 'start': round(a + max(st, .02), 3), 'end': round(a + min(en, d), 3), 'seg': s['id']})
         flag = '' if ok == len(want) else f'   << {ok}/{len(want)} heard; Whisper: {" ".join(w.word.strip() for w in heard)}'
+        lm, le, tm, te = edges(want, [w.word.strip() for w in heard])
+        ok_words = edl[s['id']].get('heard_ok', ())
+        for side, miss, extra in (('first', lm, le), ('last', tm, te)):
+            if side_status(miss, extra, ok_words) == 'missing':
+                clipped.append(f"{s['id']}: its {side} words {' '.join(miss)!r} are not in the shot")
+                flag += f"\n      !! {side} words {' '.join(miss)!r} NOT HEARD: the cut may clip them (run check_edl.py)"
         print(f"{s['id']} {a:6.2f}  " + ' '.join(f"{w}@{a + st:.2f}" for w, (st, _) in zip(want, times)) + flag, flush=True)
     with open(os.path.join(proj, 'words.json'), 'w', encoding='utf-8') as fh:
         json.dump(out, fh, indent=1, ensure_ascii=False)
+    if clipped:
+        print('\nALIGN FAILED: line words missing at a cut (the captions would show words the reel does not say):')
+        for c in clipped:
+            print('  ' + c)
+        print('Fix the in/out point in edl.json (PY check_edl.py <project> prints where the words are), re-assemble, '
+              'or add "heard_ok" to the segment only after listening.')
+        sys.exit(1)
 
 
 if __name__ == '__main__':

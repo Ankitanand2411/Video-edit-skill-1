@@ -133,6 +133,8 @@ def frames_of(proj, name, total):
 
 
 def audio_mix(proj, reel, out):
+    """voice + SFX (+ ducked music), peaks held at -3 dB. alimiter's auto level (level=1, its default) lifted
+    the mix back to full scale: a bass hit on the voice peaked at -0.7 dB. level=0 keeps -2..-5 dB peaks."""
     ff = skillenv.tool('ffmpeg')
     wav = os.path.join(proj, 'assets', 'voice.wav')   # lossless and frame-exact (assemble.py); the .m4a only on older projects
     ins, flt = ['-i', wav if os.path.isfile(wav) else os.path.join(proj, 'assets', 'voice.m4a')], []
@@ -153,7 +155,7 @@ def audio_mix(proj, reel, out):
         mixed.append('[duck]')
     else:
         voice += '[v]'
-    fc = ';'.join([voice] + flt) + ';[v]' + ''.join(mixed) + f'amix=inputs={len(mixed) + 1}:normalize=0:duration=first,alimiter=limit=0.89[a]'
+    fc = ';'.join([voice] + flt) + ';[v]' + ''.join(mixed) + f'amix=inputs={len(mixed) + 1}:normalize=0:duration=first,alimiter=limit=0.708:level=0[a]'
     subprocess.run([ff, '-v', 'error', '-y', *ins, '-filter_complex', fc, '-map', '[a]', '-c:a', 'pcm_s16le', out], check=True)
     return music
 

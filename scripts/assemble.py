@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Cut the reel straight from the originals into <project>/assets/aroll.mp4 (1080x1920, clean 30fps CFR from t=0).
 
-Usage:  PY assemble.py <project_dir>      (PY = the skill's Python, see SKILL.md; any Python 3 works for this one)
+Usage:  PY assemble.py <project_dir> [--no-check]      (PY = the skill's Python, see SKILL.md)
+First runs check_edl.py: every shot must hold the words its line says (a cut that clips "So I was" off the start of a
+line is refused, with the in-point to use instead). --no-check skips that, only after you listened to the shot.
 Needs <project>/sources.json (from ingest.py) and <project>/edl.json:
   [{"id": "hook", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "Everybody's..."}, ...]
   zoom > 1 = punch-in cropped from the original (sharp when the source is 4K), centred on (cx, cy) as frame fractions.
@@ -45,6 +47,10 @@ def frames(f):
 def main():
     skillenv.utf8_stdio()
     proj = skillenv.path_arg(sys.argv[1])
+    if '--no-check' not in sys.argv:
+        import check_edl
+        if not check_edl.run(proj):
+            sys.exit('assemble.py: the EDL check failed (above). Fix edl.json and run again; --no-check only after listening.')
     work, assets = os.path.join(proj, 'work'), os.path.join(proj, 'assets')
     with open(os.path.join(proj, 'sources.json'), encoding='utf-8') as fh:
         src = json.load(fh)
