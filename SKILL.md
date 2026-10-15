@@ -167,6 +167,8 @@ metrics.json, assets/sfx). build.py reads everything the scripts wrote; set its 
   a first pass: `PY build.py --plan` prints automatic picks (storyboard words, numbers, phrase ends); review them,
   paste the good ones in and replace the weak ones. Italic for the final word of a thought.
 - `IMPACT`: a number or year among the punch words that deserves the soft bass hit (or None).
+- Cool girl only: `SCRIPT_PUNCH` (one punch word set in handwriting with a drawn underline, e.g. {'ugly handwriting'})
+  and `SPARKLE` (None picks the ✦ words itself; `--plan` prints them).
 - Storyboard mode: open storyboard_plan.json next to the pictures and fix any cutaway that does not illustrate its
   line (move a/b to that line's shot); the build places cards, split, plates and end card from it.
 - Multi-look reels, the orbit, creator cards and the Instagram follow insert: borrow the functions from

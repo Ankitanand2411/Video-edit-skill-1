@@ -5,6 +5,9 @@
   (by 20s it lagged a few frames: two copies of the speaker on screen after a cut). assemble.py re-encodes with
   `setpts=N/30/TB -fps_mode cfr`; cutout.py asserts equal frame counts.
 - `tl.set` at a rounded time fires one frame late: use `frame/30 - 0.002`.
+- storyboard_plan.json rounds times to 3 decimals: a card hidden at 5.267 with the cut at 5.2647 stayed on the first
+  frame of the next shot (caught by check_cuts, one frame). build.py snaps any cutaway / super edge within 10ms of a
+  cut onto the cut.
 - `hyperframes snapshot` seeks approximately at cut boundaries; it can show the next shot a frame early. Only frames
   extracted from the final render (`check_cuts.py`) prove a cut.
 - When a segment's in-point is trimmed, every hard-coded word time after it shifts. Keep a `SHIFT` derived from
