@@ -89,5 +89,28 @@ class FastPng(unittest.TestCase):
         self.assertFalse(render.fast_png_on('[fastpng] not applied (x): normal PNG capture'))
 
 
+class Encode(unittest.TestCase):
+    def test_live_encode_uses_the_same_settings(self):
+        live = render.encode_args('ffmpeg', 'a.wav', '12', 100, 'o.mp4')
+        after = render.encode_args('ffmpeg', 'a.wav', '12', 100, 'o.mp4', 'frames')
+        self.assertIn('image2pipe', live)
+        self.assertEqual(live[live.index('a.wav') - 1:], after[after.index('a.wav') - 1:])   # everything after the frames
+        self.assertEqual(after[after.index('-crf') + 1], '12')
+        self.assertTrue(after[after.index('-i') + 1].endswith('%05d.png'))
+
+    def test_encoder_runs_behind_the_browsers(self):
+        kw = render.low_priority()
+        self.assertTrue(('creationflags' in kw) if os.name == 'nt' else ('preexec_fn' in kw))
+
+
+class Assemble(unittest.TestCase):
+    def test_shots_side_by_side(self):
+        import assemble
+        self.assertEqual(assemble.shots_at_once(20, 12), 3)
+        self.assertEqual(assemble.shots_at_once(20, 2), 1)
+        self.assertEqual(assemble.shots_at_once(2, 64), 2)
+        self.assertEqual(assemble.shots_at_once(20, None), 1)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -2,6 +2,7 @@
 """Final render, lossless until the last step: <project>/renders/<name>.mp4 (+ the frame-exact audio mix).
 
 Usage (after `PY build.py`):  PY render.py <project_dir> <name> [--crf 12] [--keep-frames] [--browsers N] [--no-fast-png]
+                                                                [--no-overlap]
 
 Why not `HF render` straight to MP4:
   - its MP4 path captures every frame as JPEG (q95 at --quality high) before encoding: a second lossy step that
@@ -23,6 +24,9 @@ Why not `HF render` straight to MP4:
     extracts an opaque video (the a-roll) as JPEG: a hidden lossy step on the background in every earlier render.
   - fast lossless capture: hf_fastpng.mjs (loaded into HyperFrames' Node) switches Chrome to its fast PNG encoder.
     30 frames, 1 browser: 1246 -> 816 ms a frame, every frame bit-identical (RGB and alpha). --no-fast-png turns it off.
+  - encode while drawing (machines over 8 GB): x264 takes each frame as it lands, at low priority, so the encode is
+    done a few seconds after the last frame instead of ~2 min later. On 8 GB and less it runs after the drawing, as
+    before: its ~0.5 GB would cost a browser, which costs more than it saves. --no-overlap turns it off.
   --browsers N forces the count (benchmarks). The summary line prints frames/s, browsers and what the browser drew on.
 
 Needs build.py to support `--range A B` (writes chunk_<first frame>.html covering [A, B), no audio elements) and to
@@ -190,6 +194,8 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
                 dst = os.path.join(safe, f'{n:05d}.png')
                 got += 0 if have(n) else 1
                 if os.path.exists(dst):
+                    if os.path.getsize(dst) == os.path.getsize(p):   # the same frame: the encoder may be reading it
+                        continue
                     os.remove(dst)
                 link(p, dst)
         dt = time.time() - t0
@@ -246,6 +252,61 @@ def audio_mix(proj, reel, out):
     return music
 
 
+def encode_args(ff, wav, crf, total, out, frames=None):
+    """x264 crf 12, preset slow, BT.709, 4:2:0 + AAC 320k (the one lossy audio pass). frames: the PNG folder, or None
+    for PNGs on stdin (encode while drawing)"""
+    src = (['-framerate', '30', '-i', os.path.join(frames, '%05d.png')] if frames else
+           ['-f', 'image2pipe', '-framerate', '30', '-c:v', 'png', '-i', '-'])
+    return ([ff, '-v', 'error', '-y'] + src + ['-i', wav, '-map', '0:v', '-map', '1:a',
+            '-vf', 'scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p',
+            '-c:v', 'libx264', '-preset', 'slow', '-crf', crf, '-profile:v', 'high', '-tune', 'film',
+            '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
+            '-c:a', 'aac', '-b:a', '320k', '-frames:v', str(total), '-movflags', '+faststart', out])
+
+
+def low_priority():
+    """Popen arguments that keep the encoder behind the browsers"""
+    if os.name == 'nt':
+        return {'creationflags': 0x00004000}   # BELOW_NORMAL_PRIORITY_CLASS
+    return {'preexec_fn': lambda: os.nice(10)}
+
+
+class LiveEncoder:
+    """feeds x264 every frame, in order, as soon as it is in the frames folder (complete PNG)"""
+
+    def __init__(self, argv, safe, total):
+        import threading
+        self.safe, self.total, self.fed, self.error, self.stop = safe, total, 0, None, False
+        self.proc = subprocess.Popen(argv, stdin=subprocess.PIPE, **low_priority())
+        self.thread = threading.Thread(target=self.feed, daemon=True)
+        self.thread.start()
+
+    def feed(self):
+        try:
+            for n in range(self.total):
+                p = os.path.join(self.safe, f'{n:05d}.png')
+                while not (os.path.exists(p) and complete_png(p)):
+                    if self.stop:
+                        return
+                    time.sleep(.5)
+                with open(p, 'rb') as fh:
+                    data = fh.read()
+                self.proc.stdin.write(data)
+                self.fed += 1
+            self.proc.stdin.close()
+        except (OSError, ValueError) as e:   # the encoder died: the render falls back to encoding after the drawing
+            self.error = e
+
+    def finish(self):
+        self.thread.join()
+        return self.proc.wait() == 0 and self.error is None and self.fed == self.total
+
+    def kill(self):
+        self.stop = True
+        self.proc.kill()
+        self.proc.wait()
+
+
 def main():
     skillenv.utf8_stdio()
     proj, name = skillenv.path_arg(sys.argv[1]), sys.argv[2]
@@ -259,19 +320,26 @@ def main():
     t0 = time.time()
     force = int(sys.argv[sys.argv.index('--browsers') + 1]) if '--browsers' in sys.argv else None
     stats = []
-    safe = frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv)
-    t_frames = time.time() - t0
+    ff = skillenv.tool('ffmpeg')
     wav = os.path.join(proj, 'work', f'{name}_audio.wav')
     music = audio_mix(proj, reel, wav)
     out = os.path.join(proj, 'renders', f'{name}.mp4')
-    subprocess.run([skillenv.tool('ffmpeg'), '-v', 'error', '-y', '-framerate', '30', '-i', os.path.join(safe, '%05d.png'), '-i', wav,
-                    '-map', '0:v', '-map', '1:a',
-                    '-vf', 'scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int,format=yuv420p',
-                    '-c:v', 'libx264', '-preset', 'slow', '-crf', crf, '-profile:v', 'high', '-tune', 'film',
-                    '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709', '-color_range', 'tv',
-                    '-c:a', 'aac', '-b:a', '320k', '-frames:v', str(total), '-movflags', '+faststart', out], check=True)   # the one lossy audio pass
-    n = int(subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries',
-                            'stream=nb_read_frames', '-of', 'csv=p=0', out], **skillenv.TEXT).stdout.strip() or 0)
+    safe = os.path.join(proj, 'renders', f'{name}_frames')
+    os.makedirs(safe, exist_ok=True)
+    total_mb = skillenv.memory_mb()[0]
+    live = (LiveEncoder(encode_args(ff, wav, crf, total, out), safe, total)
+            if total_mb and total_mb > LOW_MEM_MB and '--no-overlap' not in sys.argv else None)
+    try:
+        frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv)
+    except BaseException:
+        if live:
+            live.kill()
+        raise
+    t_frames = time.time() - t0
+    if not (live and live.finish()):   # no overlap (8 GB and less), or the live encode broke: encode now
+        subprocess.run(encode_args(ff, wav, crf, total, out, safe), check=True)
+    import matte
+    n = matte.packets(out)
     if n == total and '--keep-frames' not in sys.argv:   # our own intermediates: ~1.4 MB a frame
         shutil.rmtree(safe, ignore_errors=True)
         shutil.rmtree(os.path.join(proj, 'renders', f'{name}_work'), ignore_errors=True)
@@ -281,7 +349,8 @@ def main():
     if drawn:   # the numbers to compare machines and versions by
         print(f"speed: {drawn} frames drawn in {t_frames / 60:.1f} min ({drawn / t_frames:.2f} frames/s), "
               f"{len(stats)} session(s), browsers {'/'.join(str(b) for b in dict.fromkeys(s['browsers'] for s in stats))}, "
-              f"drawing on {stats[0]['drawing']}, {'fast' if all(s['fast_png'] for s in stats) else 'normal'} PNG capture; audio + encode {(time.time() - t0 - t_frames) / 60:.1f} min")
+              f"drawing on {stats[0]['drawing']}, {'fast' if all(s['fast_png'] for s in stats) else 'normal'} PNG capture; "
+              f"encode {'while drawing, done' if live else 'after the drawing,'} {(time.time() - t0 - t_frames) / 60:.1f} min after the last frame")
 
 
 if __name__ == '__main__':

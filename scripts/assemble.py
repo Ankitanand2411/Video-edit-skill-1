@@ -12,11 +12,16 @@ assets/voice.wav (lossless, -16.5 LUFS, frame-exact: what render.py mixes) + ass
 
 Why the CFR re-encode: ffmpeg concat leaves a 0.033s video start offset and timestamp gaps; `hyperframes remove-background`
 then duplicates frames and the cutout drifts out of sync with the base video by the end. setpts=N/30 fixes it.
+Speed: the shots are cut side by side into lossless intermediates (x264 qp 0, ultrafast: a 6 s shot in 1.1 s instead
+of 5.2 s at crf 14), so the a-roll is compressed once, not twice; the voice is levelled while the a-roll encodes.
+The intermediates (~13 MB a second of reel) are deleted once aroll.mp4 has every frame.
 """
 import json
 import os
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
@@ -40,8 +45,14 @@ def crop(z, cx, cy, sw, sh):
 
 
 def frames(f):
-    return int(subprocess.run([FP, '-v', 'error', '-count_frames', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_frames',
+    """frames without decoding: one packet per frame in these files (~0.1 s instead of decoding the whole file)"""
+    return int(subprocess.run([FP, '-v', 'error', '-count_packets', '-select_streams', 'v:0', '-show_entries', 'stream=nb_read_packets',
                                '-of', 'csv=p=0', f], **skillenv.TEXT).stdout.strip().split(',')[0])
+
+
+def shots_at_once(n, cores):
+    """shots cut side by side: each x264 ultrafast keeps ~7 threads busy"""
+    return max(1, min(n, (cores or 1) // 4))
 
 
 def main():
@@ -59,22 +70,24 @@ def main():
     os.makedirs(work, exist_ok=True)
     os.makedirs(assets, exist_ok=True)
     aroll = os.path.join(assets, 'aroll.mp4')
-    parts, meta = [], []
-    for k, s in enumerate(edl):
-        f = src[s['clip']]
+    parts = [os.path.join(work, f'seg_{k}.mp4') for k in range(len(edl))]
+    meta = [{**s, 'src_in': s['in'], 'src_out': s['out']} for s in edl]
+
+    def cut(k):
+        s, f = edl[k], src[edl[k]['clip']]
         sw, sh = size(f)
         d = s['out'] - s['in']
-        out = os.path.join(work, f'seg_{k}.mp4')
         # vertical fill: scale to cover 1080x1920 then centre-crop (handles 4K 9:16 and odd phone sizes)
         vf = (f"{crop(s.get('zoom', 1), s.get('cx', .5), s.get('cy', .5), sw, sh)}"
               'scale=1080:1920:force_original_aspect_ratio=increase:flags=lanczos,crop=1080:1920,fps=30')
         subprocess.run([FF, '-loglevel', 'error', '-y', '-ss', f"{s['in']:.3f}", '-t', f'{d:.3f}', '-i', f,
                         '-map', '0:v:0', '-map', '0:a:0', '-vf', vf,
                         '-af', f'afade=t=in:d=0.02,afade=t=out:st={d - 0.03:.3f}:d=0.03',   # no clicks at the joins
-                        '-c:v', 'libx264', '-crf', '14', '-preset', 'medium', '-pix_fmt', 'yuv420p',
-                        '-c:a', 'pcm_s16le', '-ar', '48000', out], check=True)
-        parts.append(out)
-        meta.append({**s, 'src_in': s['in'], 'src_out': s['out']})
+                        '-c:v', 'libx264', '-qp', '0', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',   # lossless
+                        '-c:a', 'pcm_s16le', '-ar', '48000', parts[k]], check=True)
+
+    with ThreadPoolExecutor(shots_at_once(len(edl), os.cpu_count())) as ex:
+        list(ex.map(cut, range(len(edl))))
     fr = 0
     for k, m in enumerate(meta):   # exact frame of every segment, counted before joining
         n = frames(parts[k])
@@ -97,17 +110,27 @@ def main():
     concat = os.path.join(work, 'concat.txt')
     with open(concat, 'w', encoding='utf-8', newline='\n') as fh:
         fh.write(''.join(skillenv.concat_entry(os.path.basename(p)) for p in parts))
+    levelled = []   # the voice is levelled (two loudnorm passes) while the a-roll encodes
+    lv = threading.Thread(target=lambda: levelled.append(voice(wav, os.path.join(assets, 'voice.wav'), os.path.join(assets, 'voice.m4a'))))
+    lv.start()
     subprocess.run([FF, '-loglevel', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', concat, '-i', wav, '-map', '0:v', '-map', '1:a',
                     '-vf', 'setpts=N/30/TB', '-r', '30', '-fps_mode', 'cfr',
                     '-c:v', 'libx264', '-crf', '14', '-preset', 'medium', '-g', '30', '-keyint_min', '30', '-pix_fmt', 'yuv420p',
                     '-c:a', 'aac', '-b:a', '256k', aroll], check=True)
+    lv.join()
     with open(os.path.join(proj, 'segments.json'), 'w', encoding='utf-8') as fh:
         json.dump(meta, fh, indent=1)
     for m in meta:
         print(f"frame {m['frame']:4d} ({m['frame'] / 30:6.3f}s) +{m['frames']:3d}f  {m['id']:8s} {m['clip']} {m['in']}-{m['out']}  {m.get('line', '')}")
     total = frames(aroll)
     print(f'total frames {fr} (aroll.mp4 has {total})' + ('' if total == fr else '  << MISMATCH, investigate'))
-    voice(wav, os.path.join(assets, 'voice.wav'), os.path.join(assets, 'voice.m4a'))
+    if levelled:
+        print(levelled[0])
+    else:
+        sys.exit('assemble.py: levelling the voice failed (see above)')
+    if total == fr:   # our own lossless intermediates: ~13 MB a second of reel
+        for p_ in parts:
+            os.remove(p_)
 
 
 def voice(src, out_wav, out_m4a, target=-16.5, peak=-2.0):
@@ -125,7 +148,7 @@ def voice(src, out_wav, out_m4a, target=-16.5, peak=-2.0):
     subprocess.run([FF, '-loglevel', 'error', '-y', '-i', src, '-vn', '-af', f'{chain},{lin},aresample=48000', '-c:a', 'pcm_s24le',
                     out_wav], check=True)
     subprocess.run([FF, '-loglevel', 'error', '-y', '-i', out_wav, '-c:a', 'aac', '-b:a', '256k', out_m4a], check=True)
-    print(f"voice.wav: {m['input_i']} LUFS (peak {m['input_tp']} dB) -> {target} LUFS, peak <= {peak} dB (voice.m4a: preview copy)")
+    return f"voice.wav: {m['input_i']} LUFS (peak {m['input_tp']} dB) -> {target} LUFS, peak <= {peak} dB (voice.m4a: preview copy)"
 
 
 if __name__ == '__main__':
