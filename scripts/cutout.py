@@ -2,12 +2,13 @@
 """Cut the speaker out of the assembled cut -> <project>/assets/subject.webm (VP9 + alpha), then verify it is
 frame-for-frame the same length as aroll.mp4 (a mismatch means the cutout will drift; re-run assemble.py).
 
-Usage:  PY cutout.py <project_dir> [extra remove-background arguments, e.g. --device cpu]
-Speed: ~7s per second of footage on Apple Silicon (CoreML). Everywhere else, Windows included, HyperFrames runs the
-model on the CPU (no GPU): it works, and the time depends on the processor (forced onto the CPU of an M1 Pro it
-took about twice as long as CoreML; nothing has been measured on a Windows PC yet). Run it in the background, one
-cutout at a time (~1.5 GB of RAM). The first run downloads the segmentation model (~170 MB).
-Prints a progress line every 30s. Standard library only.
+Usage:  PY cutout.py <project_dir> [--engine hyperframes] [extra remove-background arguments, e.g. --device cpu]
+With GPU support installed (setup.py --gpu: an NVIDIA GPU on Linux / Windows, or DirectML on Windows) the skill's own
+engine does it (matte.py: HyperFrames' recipe and model, on the GPU, CPU fallback frame by frame): GTX 1650, 1936
+frames in ~6 min (5.5 frames/s) instead of ~32. Otherwise HyperFrames: ~7s per second of footage on Apple Silicon
+(CoreML); on a CPU ~1 frame/s, depending on the processor. `--engine hyperframes` forces HyperFrames.
+Run it in the background, one cutout at a time (~1.5 GB of RAM). The first run downloads the model (~170 MB).
+Prints a progress line every 30s.
 """
 import collections
 import os
@@ -57,6 +58,19 @@ def run(argv, env, cwd, every=30):
     return proc.wait(), list(last)
 
 
+def gpu_engine_ready():
+    """the skill's own cutout engine runs when onnxruntime here has a CUDA or DirectML provider (setup.py --gpu).
+    Macs keep HyperFrames' CoreML path, which already uses the Apple GPU; everything else keeps HyperFrames on the CPU."""
+    try:
+        import matte
+        if not (matte.ort_ready() and os.path.isfile(matte.MODEL)):
+            return False
+        import onnxruntime
+        return bool({'CUDAExecutionProvider', 'DmlExecutionProvider'} & set(onnxruntime.get_available_providers()))
+    except Exception:
+        return False
+
+
 def main():
     skillenv.utf8_stdio()
     if len(sys.argv) < 2:
@@ -65,9 +79,21 @@ def main():
     aroll, subject = os.path.join(proj, 'assets', 'aroll.mp4'), os.path.join(proj, 'assets', 'subject.webm')
     if not os.path.isfile(aroll):
         sys.exit(f'{aroll} not found: run assemble.py first.')
+    engine = sys.argv[sys.argv.index('--engine') + 1] if '--engine' in sys.argv else 'auto'
+    extra = [x for i, x in enumerate(sys.argv[2:], 2) if x != '--engine' and sys.argv[i - 1] != '--engine']
+    if engine != 'hyperframes' and gpu_engine_ready():
+        # the skill's own engine (matte.py): HyperFrames' recipe on CUDA / DirectML, CPU fallback frame by frame
+        import matte
+        t0 = time.time()
+        res = matte.matte(aroll, subject)
+        a, s = frames(aroll), frames(subject)
+        print(f'aroll frames {a} / cutout frames {s}   ({time.time() - t0:.0f}s, {res["device"]})')
+        if not a or a != s:
+            sys.exit('FRAME MISMATCH: cutout will drift. Re-run assemble.py (clean CFR) then this script.')
+        return
     # relative paths + cwd: nothing with the user's folder name goes through npx's argument handling
     argv, env = skillenv.hyperframes_command(['remove-background', 'assets/aroll.mp4', '-o', 'assets/subject.webm',
-                                              '--quality', 'best'] + sys.argv[2:])
+                                              '--quality', 'best'] + extra)
     t0 = time.time()
     code, last = run(argv, env, proj)
     if code != 0:

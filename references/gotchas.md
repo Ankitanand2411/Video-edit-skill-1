@@ -87,6 +87,22 @@
 - A GPU with its driver but no CUDA 12 runtime (a GTX 1650 without the toolkit): faster-whisper chose "cuda" and
   died mid-transcription with "libcublas.so.12 is not found". skillenv.whisper() uses the GPU only when cuBLAS and
   cuDNN load, the CPU otherwise.
+- GPU cutout (scripts/matte.py, onnxruntime for Python, HyperFrames' recipe): HyperFrames 0.8.34 itself offers CUDA
+  on Linux only (its Windows build ships DirectML but no way to pick it). The working set on a GTX 1650 (Turing,
+  driver 595 / CUDA 13.2): onnxruntime-gpu 1.22 + CUDA 12 pip libraries + cuDNN 9.10. onnxruntime-gpu 1.31 wants
+  CUDA 13 (libcublasLt.so.13); cuDNN 9.27 fails on Turing ("No valid engine configs for ConvFwd"); the CUDA provider
+  also needs libnvrtc.so.12, which sits in its own pip folder (skillenv.CUDA_PRELOAD loads it first).
+- onnxruntime re-creates a session on the CPU when a GPU kernel fails at run time and carries on silently: a "cuda"
+  self-test compared the CPU with itself. matte.py calls session.disable_fallback() and checks the provider after the
+  run. Whisper's own requirement re-installs the CPU-only onnxruntime over the GPU build on a venv repair: gpu.py
+  (every setup run) notices and restores the GPU build from pip's cache (11 s).
+- Our cutout vs HyperFrames' on the same frames: alpha 40 dB average, 146/150 frames >= 35 dB; the rest differ only
+  inside the glasses lenses (both models leave them half see-through; the same frame sits under the cutout, so it
+  does not show). The resizers differ (Pillow Lanczos vs sharp/libvips). GPU vs CPU of our engine: 63.7 dB.
+- Parallel render: frames of several browsers live in `capture-attempt-*/worker-*/` while the render runs
+  (`captured-frames/` stays empty): a watchdog that only looked there killed healthy renders.
+- HyperFrames extracts an opaque video (the a-roll) as JPEG for the browser by default (`--video-frame-format auto`):
+  a hidden lossy step on the background. render.py passes `--video-frame-format png`.
 - Node 22+ for HyperFrames, pinned `hyperframes@0.8.34`. Start it with `HF` (`PY "SK/scripts/hf.py" <command>`): it
   puts a Node 22+ first on PATH on any OS (an nvm default of Node 20 otherwise gives "HyperFrames requires Node.js >= 22").
 - Python scripts run in the skill's own venv. Its path differs per OS (`.venv/bin/python` on Mac and Linux,
