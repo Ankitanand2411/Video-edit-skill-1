@@ -98,6 +98,49 @@ def cutout_provider(info):
     return 'CoreML' if (info['os'], info['arch']) == ('macos', 'arm64') else 'CPU'
 
 
+def parse_meminfo(text):
+    """Linux /proc/meminfo -> (total_mb, available_mb)"""
+    kb = {k: int(v.split()[0]) for k, v in (l.split(':', 1) for l in text.splitlines() if ':' in l) if v.split()}
+    total = kb.get('MemTotal')
+    avail = kb.get('MemAvailable', (kb.get('MemFree', 0) + kb.get('Cached', 0)) or None)
+    return (total // 1024 if total else None), (avail // 1024 if avail else None)
+
+
+def parse_vm_stat(text, total_bytes):
+    """macOS `vm_stat` + `sysctl -n hw.memsize` -> (total_mb, available_mb): free + inactive + speculative pages"""
+    page = int(re.search(r'page size of (\d+) bytes', text).group(1)) if re.search(r'page size of (\d+)', text) else 4096
+    pages = {k.strip().lower(): int(v.strip().rstrip('.')) for k, v in (l.split(':', 1) for l in text.splitlines()[1:] if ':' in l)
+             if v.strip().rstrip('.').isdigit()}
+    free = sum(pages.get(k, 0) for k in ('pages free', 'pages inactive', 'pages speculative'))
+    return int(total_bytes) // 1048576, free * page // 1048576
+
+
+def memory_mb():
+    """(total_mb, available_mb) of system RAM right now, (None, None) when unknown. Standard library only."""
+    try:
+        if sys.platform.startswith('linux'):
+            with open('/proc/meminfo', encoding='utf-8') as fh:
+                return parse_meminfo(fh.read())
+        if sys.platform == 'darwin':
+            total = subprocess.run(['sysctl', '-n', 'hw.memsize'], **TEXT).stdout.strip()
+            return parse_vm_stat(subprocess.run(['vm_stat'], **TEXT).stdout, total)
+        if os.name == 'nt':
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [('dwLength', ctypes.c_ulong), ('dwMemoryLoad', ctypes.c_ulong), ('ullTotalPhys', ctypes.c_ulonglong),
+                            ('ullAvailPhys', ctypes.c_ulonglong), ('ullTotalPageFile', ctypes.c_ulonglong),
+                            ('ullAvailPageFile', ctypes.c_ulonglong), ('ullTotalVirtual', ctypes.c_ulonglong),
+                            ('ullAvailVirtual', ctypes.c_ulonglong), ('ullAvailExtendedVirtual', ctypes.c_ulonglong)]
+            ms = MS()
+            ms.dwLength = ctypes.sizeof(MS)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+                return ms.ullTotalPhys // 1048576, ms.ullAvailPhys // 1048576
+    except Exception:
+        pass
+    return None, None
+
+
 # ------------------------------------------------------------------ paths
 def _pm(osn):
     return ntpath if osn == 'windows' else posixpath
@@ -402,6 +445,44 @@ def download(urls, dest, md5=None, min_rate=150_000, grace=20, say=print):
 
 
 CUDA_LIBS = {'windows': ('cublas64_12.dll', 'cudnn_ops64_9.dll'), 'other': ('libcublas.so.12', 'libcudnn_ops.so.9')}
+# the pip NVIDIA libraries (setup.py --gpu installs nvidia-*-cu12 into the venv), top level first: each finds its own
+# sub-libraries next to it
+CUDA_PRELOAD = ('libcudart.so.12', 'libnvrtc.so.12', 'libnvJitLink.so.12', 'libcublasLt.so.12', 'libcublas.so.12',
+                'libcufft.so.11', 'libcurand.so.10', 'libcudnn.so.9', 'libcudnn_ops.so.9')   # onnxruntime's CUDA provider needs nvrtc
+_CUDA_LOADED = []
+
+
+def cuda_lib_dirs(roots=None, windows=None):
+    """folders of the pip NVIDIA libraries in the venv: nvidia/<name>/lib (Linux) or nvidia/<name>/bin (Windows)"""
+    windows = os.name == 'nt' if windows is None else windows
+    roots = roots if roots is not None else [p for p in sys.path if p.rstrip('/\\').endswith('site-packages')]
+    return sorted(d for r in roots for d in glob.glob(os.path.join(r, 'nvidia', '*', 'bin' if windows else 'lib')))
+
+
+def load_cuda_libs():
+    """make the venv's NVIDIA libraries (CUDA 12 + cuDNN 9) visible to Whisper and onnxruntime in this process.
+    Linux: load them once, globally, top level first; Windows: add their folders to the DLL search path.
+    No-op when they are not installed. Nothing system-wide, no restart."""
+    if _CUDA_LOADED:
+        return _CUDA_LOADED[0]
+    dirs = cuda_lib_dirs()
+    ok = False
+    if dirs and os.name == 'nt':
+        for d in dirs:
+            os.add_dll_directory(d)
+        ok = True
+    elif dirs:
+        import ctypes
+        found = {os.path.basename(f): f for d in dirs for f in glob.glob(os.path.join(d, 'lib*.so*'))}
+        for name in CUDA_PRELOAD:
+            if name in found:
+                try:
+                    ctypes.CDLL(found[name], mode=ctypes.RTLD_GLOBAL)
+                    ok = True
+                except OSError:
+                    pass
+    _CUDA_LOADED.append(ok)
+    return ok
 
 
 def pick_device(cuda_count, libs_load):
@@ -418,6 +499,7 @@ def whisper_device():
         return 'cpu'
     if not count:
         return 'cpu'
+    load_cuda_libs()   # the venv's pip NVIDIA libraries, when setup.py --gpu installed them
     import ctypes
     try:
         for lib in CUDA_LIBS['windows' if os.name == 'nt' else 'other']:

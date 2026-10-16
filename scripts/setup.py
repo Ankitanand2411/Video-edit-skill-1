@@ -10,6 +10,9 @@ Run it with whichever Python the machine has:   python3 setup.py   |   python se
   3. Python 3.10+ and a venv inside the skill with faster-whisper + Pillow (transcription, head tracking)
   4. Sound effects in assets/template/assets/sfx (not bundled: the Pixabay license forbids redistributing the files)
   5. Models: Whisper small.en + the background-removal model (scripts/models.py, IPv4-first, mirror fallback)
+  6. GPU support (optional, scripts/gpu.py): reported every run; `setup.py --gpu` installs it into the skill folder
+     (NVIDIA: CUDA libraries + onnxruntime-gpu, ~1.7 GB; other Windows GPUs: onnxruntime-directml, ~25 MB; Mac:
+     nothing to install). No restart. Without it everything runs on the CPU as before.
 
 Prints a STATUS line per item, each with the fix for THIS machine, then READY or NOT READY. Exit code 0 only when
 everything is ready. Writes <skill>/.platform.json (os, arch, the venv Python, how to start npx) so the other
@@ -232,8 +235,8 @@ def main():
     info = skillenv.detect()
     osn = info['os']
     provider = skillenv.cutout_provider(info)
-    how = 'Apple GPU / Neural Engine' if provider == 'CoreML' else 'no GPU acceleration, speed depends on the processor'
-    say(f'STATUS system {skillenv.os_label(info)} | background cutout runs on {provider} ({how})')
+    how = 'on the Apple GPU / Neural Engine' if provider == 'CoreML' else 'on the CPU unless GPU support is installed (STATUS gpu below)'
+    say(f'STATUS system {skillenv.os_label(info)} | background cutout runs {how}')
 
     ff_ok, ffmpeg, ffprobe = check_ffmpeg(osn)
     node_ok, node, node_ver, npx = check_node(osn)
@@ -243,6 +246,15 @@ def main():
         r = subprocess.run([py, os.path.join(skillenv.SKILL_DIR, 'scripts', 'models.py')], **skillenv.TEXT)
         for line in (r.stdout + r.stderr).splitlines():
             if line.startswith(('STATUS', '        ')):
+                say(line)
+    gpu = None
+    if py_ok:   # 6. GPU support (optional): reported every run, installed only with --gpu (the user says yes first)
+        r = subprocess.run([py, os.path.join(skillenv.SKILL_DIR, 'scripts', 'gpu.py')] + (['--install'] if '--gpu' in sys.argv else []),
+                           **skillenv.TEXT)
+        for line in r.stdout.splitlines():
+            if line.startswith('GPU '):
+                gpu = json.loads(line[4:])
+            elif line.strip():
                 say(line)
     ready = ff_ok and node_ok and py_ok
 
@@ -259,7 +271,8 @@ def main():
         'node': sp(node) if node_ok else None, 'node_version': node_ver or None,
         'npx': [sp(p) for p in npx] if npx else None,
         'hyperframes': skillenv.HYPERFRAMES,
-        'cutout': provider,
+        'cutout': (gpu or {}).get('cutout', '').upper() if (gpu or {}).get('cutout') else provider,
+        'gpu': gpu,
         'sfx': sfx_ok,
     }
     with open(skillenv.PLATFORM_FILE, 'w', encoding='utf-8') as f:
