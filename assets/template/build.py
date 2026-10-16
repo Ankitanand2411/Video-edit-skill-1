@@ -6,7 +6,7 @@ It is the finished build of a real reel ("how handwriting helps the brain learn 
 
 Inputs (written by the skill's scripts, nothing to hand-type):
   segments.json (assemble.py)   words.json (align.py)   headpos.json (headpos.py)   storyboard_plan.json (optional,
-  storyboard_plan.py)   assets/aroll.mp4  assets/subject.webm (cutout.py)  assets/voice.m4a (assemble.py)
+  storyboard_plan.py)   assets/aroll.mp4  assets/subject/*.webm (cutout.py)  assets/voice.m4a (assemble.py)
   assets/fonts/metrics.json (font metrics: placement and line widths are computed, not eyeballed)
 CONTENT to set per reel: LOOK, PUNCH (empty = automatic picks, printed: review them), FIX, IMPACT, and in the cool
 girl look SCRIPT_PUNCH (a punch word set in handwriting with a drawn underline) and SPARKLE (None = automatic picks).
@@ -17,7 +17,9 @@ PY build.py --safe        same + red Instagram safe-zone guide (snapshots only, 
 PY build.py --plan        also prints the caption plan, punch words and storyboard layer
 PY build.py --range A B   chunk_<first frame>.html covering [A, B) with no audio (scripts/render.py renders the reel
                           in short sessions to lossless PNG frames, then encodes once)
-Also writes work/reel.json (length + the SFX list) for scripts/render.py's audio mix.
+Also writes work/reel.json (length + the SFX list) for scripts/render.py's audio mix, and work/cutout_plan.json: the
+a-roll frames the cutout must cover (only where something sits behind the head; every frame when the look grades the
+cutout differently from the room) in pieces of up to 10 s. Run scripts/cutout.py after every build that moves them.
 """
 import json
 import os
@@ -642,7 +644,7 @@ def fx():
 
 
 def grades():
-    tw = [f"gsap.set('.g',{{filter:'{L['room']}'}});", f"gsap.set('#cut',{{filter:'{L['subject']}'}});",
+    tw = [f"gsap.set('.g',{{filter:'{L['room']}'}});",   # the cutout pieces get theirs in build() (.cut)
           "tl.fromTo('#stage',{filter:'blur(18px) brightness(1.35)'},{filter:'blur(0px) brightness(1)',duration:.45,ease:'power3.out',immediateRender:false},0);",
           "tl.set('#stage',{filter:'none'},.47);"]   # quick blur-to-focus into the reel
     for sid in ORDER:
@@ -777,6 +779,118 @@ SAFE_GUIDE = ('<div style="position:absolute;inset:0;z-index:99;pointer-events:n
               '<div style="position:absolute;right:0;width:100px;top:1155px;height:315px;background:rgba(255,0,0,.28)"></div></div>')
 
 
+# ------------------------------------------------------------------ cutout: only where something sits behind the head
+# Everything behind the head lives in #stage between the a-roll and the cutout (back_html). Anywhere else the cutout
+# shows the same pixels as the a-roll under it (same grade in the girl and bold looks), so it is not needed there:
+# it costs ~45% of every rendered frame (816 vs 447 ms, 1 browser) and 1 s of CPU per frame to cut out.
+CUT_MARGIN, CUT_MERGE, CUT_PIECE = 3, 8, 300    # frames kept on each side / gaps closed / longest piece
+FPS = 30
+FRAMES = round(DUR * FPS)
+NOT_ZERO = re.compile(r'(?:autoAlpha|opacity):(?!0(?![.\d]))[\d.]+')
+ZERO = re.compile(r'(?:autoAlpha|opacity):0(?![.\d])')
+
+
+def html_ids(html):
+    return [i for h in html for i in re.findall(r'<\w+[^>]*\bid="([^"]+)"', h)]
+
+
+def hides(code):
+    """True when these tween vars leave the element invisible"""
+    return bool(ZERO.search(code)) and not NOT_ZERO.search(code)
+
+
+def shown_windows(ids, tweens, end):
+    """{id: (from s, to s)}: when each element can be on screen, read from its tweens. Hidden by a gsap.set -> from
+    its first timeline tween, else from 0; its last tween hides it -> until that tween ends, else to `end`. Never
+    less than the truth: an element shown twice gets one window over both."""
+    want, hidden0, seen = set(ids), set(), {}
+    for code in tweens:
+        m = re.match(r"\s*(tl|gsap)\.(set|to|from|fromTo)\('([^']*)'", code)
+        if not m:
+            continue
+        for i in set(re.findall(r'#([\w-]+)', m.group(3))) & want:
+            if m.group(1) == 'gsap':
+                if hides(code):
+                    hidden0.add(i)
+                continue
+            at = re.search(r',\s*(-?[\d.]+)\s*\)\s*;?\s*$', code)
+            dur = re.findall(r'duration:([\d.]+)', code)
+            rep = re.search(r'repeat:(\d+)', code)
+            t = float(at.group(1)) if at else 0.0
+            span = (float(dur[-1]) if dur else 0.0) * (1 + (int(rep.group(1)) if rep else 0))
+            final = code.split('},{', 1)[1] if m.group(2) == 'fromTo' and '},{' in code else code
+            seen.setdefault(i, []).append((t, t + span, hides(final)))
+    out = {}
+    for i in ids:
+        tw = sorted(seen.get(i, []), key=lambda x: (x[1], x[0]))
+        if not tw:
+            if i not in hidden0:
+                out[i] = (0.0, end)
+            continue
+        out[i] = (min(x[0] for x in tw) if i in hidden0 else 0.0, tw[-1][1] if tw[-1][2] else end)
+    return out
+
+
+def cut_pieces(windows, frames, margin=CUT_MARGIN, merge=CUT_MERGE, piece=CUT_PIECE, fps=FPS):
+    """-> [(first frame, end frame)]: the a-roll frames the cutout must cover, gaps under `merge` closed, split into
+    pieces of at most `piece` frames (pieces are cut out side by side, and a rebuild only redoes the pieces it moves)"""
+    spans = sorted((max(0, int(a * fps) - margin), min(frames, -int(-b * fps // 1) + margin)) for a, b in windows)
+    merged = []
+    for a, b in spans:
+        if b <= a:
+            continue
+        if merged and a - merged[-1][1] <= merge:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    out = []
+    for a, b in merged:
+        n = -(-(b - a) // piece)
+        step = -(-(b - a) // n)
+        out += [(x, min(b, x + step)) for x in range(a, b, step)]
+    return out
+
+
+def piece_file(a, b):
+    return f'assets/subject/{a:05d}-{b:05d}.webm'
+
+
+def floor6(x):
+    return int(x * 1e6) / 1e6
+
+
+def media_start(frame, fps=FPS):
+    """data-media-start for a video starting at this frame of its file: a quarter frame early. HyperFrames extracts
+    with `ffmpeg -ss <media start>`, which drops a frame that starts even a hair before it ("17.967" loses the frame
+    at 17.9667 s): an exact time printed with 3 decimals can start the video a frame late."""
+    return f'{max(0.0, (frame - .25) / fps):.6f}'
+
+
+def cut_videos(pieces, a0, vd, fps=FPS):
+    """one <video> per cutout piece inside [a0, a0 + vd). HyperFrames shows a video while start <= t <= start +
+    duration and picks frame floor((t - start) * fps): the start is rounded down, the duration ends half a frame
+    before the next piece, so every frame comes from exactly one piece."""
+    f0, f1 = round(a0 * fps), round((a0 + vd) * fps)
+    out = []
+    for k, (a, b) in enumerate(pieces):
+        lo, hi = max(a, f0), min(b, f1)
+        if hi - lo < 1:
+            continue
+        out.append(f'<video id="cut{k}" class="full g cut" src="{piece_file(a, b)}" muted playsinline '
+                   f'data-start="{floor6((lo - f0) / fps):.6f}" data-media-start="{media_start(lo - a) if lo > a else "0"}" '
+                   f'data-duration="{(hi - lo - .5) / fps:.6f}" data-track-index="1"></video>')
+    return out
+
+
+def cutout_pieces(back_html, tweens):
+    if L['subject'] != L['room']:   # the cutout is graded on its own (cool dude): every frame
+        return cut_pieces([(0.0, DUR)], FRAMES, margin=0)
+    return cut_pieces(list(shown_windows(html_ids(back_html), tweens, REEL_DUR).values()), FRAMES)
+
+
+PIECES = []
+
+
 def build():
     caps_html, back_html, front_html, s_tw = core()
     if L['fx'] == 'girl':   # cool girl: ✦ beside the chosen words
@@ -787,13 +901,16 @@ def build():
     p_html, p_tw = supers()
     e_html, e_tw = end_card()
     tweens = grades() + s_tw + f_tw + c_tw + p_tw + e_tw
+    PIECES[:] = cutout_pieces(back_html, tweens)
     nl = '\n'
     a0, d = (RANGE[0], min(RANGE[1], REEL_DUR) - RANGE[0]) if RANGE else (0.0, REEL_DUR)
     vd = min(d, DUR - a0)   # the a-roll ends before an end card does
-    vids = (f'    <video id="bgv" class="full g" src="assets/aroll.mp4" muted playsinline data-start="0" data-media-start="{a0:.3f}" '
-            f'data-duration="{vd:.3f}" data-track-index="0"></video>\n') if vd > .02 else ''
-    cutv = (f'    <div id="cutwrap"><video id="cut" class="full g" src="assets/subject.webm" muted playsinline data-start="0" '
-            f'data-media-start="{a0:.3f}" data-duration="{vd:.3f}" data-track-index="1"></video></div>\n') if vd > .02 else ''
+    vids = (f'    <video id="bgv" class="full g" src="assets/aroll.mp4" muted playsinline data-start="0" '
+            f'data-media-start="{media_start(round(a0 * FPS))}" data-duration="{vd:.3f}" data-track-index="0"></video>\n') if vd > .02 else ''
+    cuts = cut_videos(PIECES, a0, vd) if vd > .02 else []
+    cutv = f'    <div id="cutwrap">{"".join(cuts)}</div>\n' if cuts else ''
+    if cuts:
+        tweens.insert(1, f"gsap.set('.cut',{{filter:'{L['subject']}'}});")
     sound = '' if RANGE else (f'  <audio id="bga" src="assets/voice.m4a" data-start="0" data-media-start="0" data-duration="{DUR:.3f}" '
                               f'data-track-index="2" data-volume="1"></audio>\n' + nl.join(audio()))
     # chunk: the full timeline stays as built; a wrapper maps chunk time t -> reel time a0 + t
@@ -843,6 +960,10 @@ with open('work/reel.json', 'w', encoding='utf-8') as _f:   # for scripts/render
     json.dump({'look': LOOK, 'aroll_dur': DUR, 'reel_dur': round(REEL_DUR, 4), 'frames': round(REEL_DUR * 30),
                'sfx': [{'name': n, 't': round(t, 3), 'dur': round(min(SFX_LEN[n], REEL_DUR - t), 3), 'vol': round(v * SFX_GAIN, 3)}
                        for n, t, v in SFX]}, _f, indent=1)
+if not RANGE:   # for scripts/cutout.py: the pieces this page shows
+    with open('work/cutout_plan.json', 'w', encoding='utf-8') as _f:
+        json.dump({'fps': FPS, 'frames': FRAMES, 'every_frame': L['subject'] != L['room'],
+                   'pieces': [{'a': a, 'b': b, 'file': piece_file(a, b)} for a, b in PIECES]}, _f, indent=1)
 if '--plan' in sys.argv:
     for g in caps_groups():
         print(f"{g['sid']} {g['words'][0][0]:6.2f}-{g['end']:6.2f}  {' '.join(w for _, w in g['words'])}")
@@ -855,3 +976,7 @@ if '--plan' in sys.argv:
         print(f"cutaway {c['id']:8s} {c['a']:6.2f}-{c['b']:6.2f}  " + (f"{c['w']}x{c['h']} at ({c['x']},{c['y']}) {c['image']}" if c['kind'] == 'card' else 'split'))
 print(f"wrote {OUT}  look {LOOK}  reel {REEL_DUR:.3f}s (a-roll {DUR:.3f}s)  {len(CUTS)} cuts  {len(PUNCHES)} punch words"
       + (f"  {len(CUTAWAYS)} cutaways  {len(SUPERS)} supers{'  end card' if ENDC else ''}" if PLAN else ''))
+if not RANGE:
+    _missing = [piece_file(a, b) for a, b in PIECES if not os.path.isfile(piece_file(a, b))]
+    print(f"cutout: {sum(b - a for a, b in PIECES)} of {FRAMES} frames in {len(PIECES)} pieces"
+          + (f"  ({len(_missing)} not cut out yet: run scripts/cutout.py before snapshots and the render)" if _missing else '  (all cut out)'))

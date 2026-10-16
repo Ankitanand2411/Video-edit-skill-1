@@ -204,6 +204,20 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
             sys.exit(f'no progress from frame {start}: see {log}')
 
 
+def missing_pieces(proj, frames_of=None):
+    """cutout pieces the page shows that are missing or short (work/cutout_plan.json from build.py): rendering without
+    them would draw the behind-head words over the face"""
+    plan_file = os.path.join(proj, 'work', 'cutout_plan.json')
+    if not os.path.isfile(plan_file):
+        return []
+    import matte
+    frames_of = frames_of or matte.packets
+    with open(plan_file, encoding='utf-8') as fh:
+        pieces = json.load(fh)['pieces']
+    return [p['file'] for p in pieces if not os.path.isfile(os.path.join(proj, p['file']))
+            or frames_of(os.path.join(proj, p['file'])) != p['b'] - p['a']]
+
+
 def audio_mix(proj, reel, out):
     """voice + SFX (+ ducked music), peaks held at -3 dB. alimiter's auto level (level=1, its default) lifted
     the mix back to full scale: a bass hit on the voice peaked at -0.7 dB. level=0 keeps -2..-5 dB peaks."""
@@ -239,6 +253,9 @@ def main():
     with open(os.path.join(proj, 'work', 'reel.json'), encoding='utf-8') as fh:
         reel = json.load(fh)
     total = reel['frames']
+    gone = missing_pieces(proj)
+    if gone:
+        sys.exit(f'{len(gone)} cutout pieces missing or short ({gone[0]} ...): run cutout.py first (build.py moved them)')
     t0 = time.time()
     force = int(sys.argv[sys.argv.index('--browsers') + 1]) if '--browsers' in sys.argv else None
     stats = []
