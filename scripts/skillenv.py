@@ -509,15 +509,81 @@ def whisper_device():
     return pick_device(count, True)
 
 
-def whisper(name, **kw):
-    """faster-whisper model, offline first (no network call once cached); a first download goes IPv4-first and
-    without the Xet transfer client (it stalled at 0 bytes on a network with broken IPv6). Runs on the GPU only when
-    its CUDA libraries are really there (whisper_device), otherwise on the CPU."""
+def physical_cores():
+    """CPU cores without their hyper-threads: onnxruntime and CTranslate2 (Whisper) run best on these. Linux reads
+    /proc/cpuinfo, macOS asks sysctl; elsewhere half the logical count (x86 desktops have 2 threads a core)."""
+    n = os.cpu_count() or 1
+    try:
+        if sys.platform.startswith('linux'):
+            seen, phys = set(), '0'
+            with open('/proc/cpuinfo', encoding='utf-8', errors='replace') as fh:
+                for line in fh:
+                    if line.startswith('physical id'):
+                        phys = line.split(':', 1)[1].strip()
+                    elif line.startswith('core id'):
+                        seen.add((phys, line.split(':', 1)[1].strip()))
+            if seen:
+                return len(seen)
+        elif sys.platform == 'darwin':
+            out = subprocess.run(['sysctl', '-n', 'hw.physicalcpu'], timeout=10, **TEXT).stdout.strip()
+            if out.isdigit():
+                return int(out)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return max(1, n // 2) if n >= 4 else n
+
+
+def _whisper_model(name, kw):
     from faster_whisper import WhisperModel
-    kw.setdefault('device', whisper_device())
+    if kw.get('device') == 'cpu':
+        kw.setdefault('cpu_threads', physical_cores())   # faster-whisper uses 4 threads unless told
     try:
         return WhisperModel(name, compute_type='int8', local_files_only=True, **kw)
     except Exception:
         prefer_ipv4()
         os.environ.setdefault('HF_HUB_DISABLE_XET', '1')
         return WhisperModel(name, compute_type='int8', **kw)
+
+
+class Whisper:
+    """faster-whisper with a way out: when the GPU fails (out of memory, a driver hiccup) while loading or in the middle
+    of a transcription, the model reloads on the CPU and that call is redone, instead of the step dying.
+    transcribe() returns (list of segments, info): the work happens here, so a GPU error cannot surface later."""
+
+    def __init__(self, name, kw):
+        self.name, self.kw = name, kw
+        self.device = kw.get('device', 'cpu')
+        try:
+            self.model = _whisper_model(name, kw)
+        except Exception as e:
+            if self.device == 'cpu':
+                raise
+            self._to_cpu(e)
+
+    def _to_cpu(self, e):
+        print(f'whisper: the GPU failed ({str(e).splitlines()[0][:120] if str(e) else type(e).__name__}): '
+              f'reloading {self.name} on the CPU', flush=True)
+        self.kw['device'] = self.device = 'cpu'
+        self.model = _whisper_model(self.name, self.kw)
+
+    def transcribe(self, audio, **opts):
+        if self.device != 'cpu':
+            try:
+                segs, info = self.model.transcribe(audio, **opts)
+                return list(segs), info
+            except Exception as e:   # anything on the GPU: the CPU redoes it (a bad input fails there too, and says so)
+                self._to_cpu(e)
+        segs, info = self.model.transcribe(audio, **opts)
+        return list(segs), info
+
+    def __getattr__(self, attr):
+        return getattr(self.model, attr)
+
+
+def whisper(name, **kw):
+    """faster-whisper model, offline first (no network call once cached); a first download goes IPv4-first and
+    without the Xet transfer client (it stalled at 0 bytes on a network with broken IPv6). Runs on the GPU only when
+    its CUDA libraries are really there (whisper_device), otherwise on every physical CPU core; a GPU failure moves it
+    to the CPU (Whisper class)."""
+    kw.setdefault('device', whisper_device())
+    return Whisper(name, kw)

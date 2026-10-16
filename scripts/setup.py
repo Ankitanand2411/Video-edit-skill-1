@@ -235,7 +235,8 @@ def main():
     info = skillenv.detect()
     osn = info['os']
     provider = skillenv.cutout_provider(info)
-    how = 'on the Apple GPU / Neural Engine' if provider == 'CoreML' else 'on the CPU unless GPU support is installed (STATUS gpu below)'
+    how = ('on the Apple GPU / Neural Engine' if provider == 'CoreML'
+           else 'on every CPU core unless GPU support is installed (STATUS gpu below)')
     say(f'STATUS system {skillenv.os_label(info)} | background cutout runs {how}')
 
     ff_ok, ffmpeg, ffprobe = check_ffmpeg(osn)

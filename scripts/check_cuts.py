@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
@@ -26,20 +27,29 @@ with open(os.path.join(proj, 'segments.json'), encoding='utf-8') as fh:
 cf = os.path.join(proj, 'work', 'cf')
 sheet = os.path.join(proj, 'work', 'cut_check.jpg')
 os.makedirs(cf, exist_ok=True)
-pngs = []
-for s in segs[1:]:
-    for n in (s['frame'] - 1, s['frame']):
-        p = os.path.join(cf, f'f{n}.png')
-        subprocess.run([FF, '-loglevel', 'error', '-y', '-i', render, '-vf', f'select=eq(n\\,{n}),scale=150:-2', '-frames:v', '1', p], check=True)
-        pngs.append(p)
+phone = []
+if '--phone' in sys.argv:   # encodes while the cut sheet and the lip sync check run
+    out = os.path.splitext(render)[0] + '-phone.mp4'
+
+    def phone_copy():
+        subprocess.run([FF, '-loglevel', 'error', '-y', '-i', render, '-vf', 'scale=720:-2', '-c:v', 'libx264', '-crf', '26', '-preset', 'slow',
+                        '-c:a', 'copy', '-movflags', '+faststart', out], check=True)   # audio copied: a 2nd AAC pass audibly degrades it
+        phone.append(f'phone copy {out} {os.path.getsize(out) / 1e6:.1f} MB')
+    th = threading.Thread(target=phone_copy)
+    th.start()
+# every frame the sheet needs, in one decode (one ffmpeg per frame decoded the render up to that frame 38 times)
+want = sorted({n for s in segs[1:] for n in (s['frame'] - 1, s['frame'])})
+for f in os.listdir(cf):
+    if f.startswith('q') and f.endswith('.png'):
+        os.remove(os.path.join(cf, f))   # this script's own frames from an earlier run
+sel = '+'.join(f'eq(n,{n})' for n in want)
+subprocess.run([FF, '-loglevel', 'error', '-y', '-i', render, '-vf', f"select='{sel}',scale=150:-2", '-fps_mode', 'passthrough',
+                os.path.join(cf, 'q%04d.png')], check=True)
+got = {n: os.path.join(cf, f'q{k + 1:04d}.png') for k, n in enumerate(want)}
+pngs = [got[n] for s in segs[1:] for n in (s['frame'] - 1, s['frame'])]
 ins = sum((['-i', p] for p in pngs), [])
 subprocess.run([FF, '-loglevel', 'error', '-y', *ins, '-filter_complex', f'hstack={len(pngs)}', sheet], check=True)
 print('cuts at frames', [s['frame'] for s in segs[1:]], '->', sheet)
-if '--phone' in sys.argv:
-    out = os.path.splitext(render)[0] + '-phone.mp4'
-    subprocess.run([FF, '-loglevel', 'error', '-y', '-i', render, '-vf', 'scale=720:-2', '-c:v', 'libx264', '-crf', '26', '-preset', 'slow',
-                    '-c:a', 'copy', '-movflags', '+faststart', out], check=True)   # audio copied: a 2nd AAC pass audibly degrades it
-    print('phone copy', out, f'{os.path.getsize(out) / 1e6:.1f} MB')
 
 
 def sync_check():
@@ -77,3 +87,8 @@ def sync_check():
 
 if '--no-sync' not in sys.argv:
     sync_check()
+if '--phone' in sys.argv:
+    th.join()
+    if not phone:
+        sys.exit('phone copy failed (see above)')
+    print(phone[0])

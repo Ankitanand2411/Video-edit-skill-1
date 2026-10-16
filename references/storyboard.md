@@ -18,7 +18,7 @@ end card laid on the edit. First built for "How handwriting helps the brain lear
 ## Pipeline
 ```
 PY SK/scripts/storyboard.py <project> <storyboard.xlsx>    # storyboard.json + the pictures, untouched
-... ingest, EDL, assemble, align, cutout, headpos as usual ...
+... ingest, EDL, assemble, align, headpos as usual (the cutout comes after the build) ...
 PY SK/scripts/storyboard_plan.py <project>                 # storyboard_plan.json: scenes, cutaways, supers, end card
 ```
 The SCRIPT is the creator's intent, not what they said: use it to understand the reel and to check names and

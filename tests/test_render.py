@@ -72,5 +72,45 @@ class Memory(unittest.TestCase):
         self.assertEqual(skillenv.parse_vm_stat(text, 17179869184), (16384, 5000))
 
 
+class FastPng(unittest.TestCase):
+    def test_preload_goes_into_node_options_as_a_file_url(self):
+        env = render.fast_png_env({'NODE_OPTIONS': '--max-old-space-size=4096'})
+        opt = env['NODE_OPTIONS']
+        self.assertTrue(opt.startswith('--max-old-space-size=4096 --import file:'), opt)
+        self.assertTrue(opt.endswith('hf_fastpng.mjs'))
+        self.assertNotIn(' ', opt.split('--import ', 1)[1])   # a file URL: spaces in a user folder are %20
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, 'scripts', 'hf_fastpng.mjs')))
+
+    def test_off_leaves_the_environment_alone(self):
+        self.assertEqual(render.fast_png_env({'A': '1'}, on=False), {'A': '1'})
+
+    def test_log_says_whether_it_engaged(self):
+        self.assertTrue(render.fast_png_on('...\n[fastpng] fast lossless PNG capture on\n...'))
+        self.assertFalse(render.fast_png_on('[fastpng] not applied (x): normal PNG capture'))
+
+
+class Encode(unittest.TestCase):
+    def test_live_encode_uses_the_same_settings(self):
+        live = render.encode_args('ffmpeg', 'a.wav', '12', 100, 'o.mp4')
+        after = render.encode_args('ffmpeg', 'a.wav', '12', 100, 'o.mp4', 'frames')
+        self.assertIn('image2pipe', live)
+        self.assertEqual(live[live.index('a.wav') - 1:], after[after.index('a.wav') - 1:])   # everything after the frames
+        self.assertEqual(after[after.index('-crf') + 1], '12')
+        self.assertTrue(after[after.index('-i') + 1].endswith('%05d.png'))
+
+    def test_encoder_runs_behind_the_browsers(self):
+        kw = render.low_priority()
+        self.assertTrue(('creationflags' in kw) if os.name == 'nt' else ('preexec_fn' in kw))
+
+
+class Assemble(unittest.TestCase):
+    def test_shots_side_by_side(self):
+        import assemble
+        self.assertEqual(assemble.shots_at_once(20, 12), 3)
+        self.assertEqual(assemble.shots_at_once(20, 2), 1)
+        self.assertEqual(assemble.shots_at_once(2, 64), 2)
+        self.assertEqual(assemble.shots_at_once(20, None), 1)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

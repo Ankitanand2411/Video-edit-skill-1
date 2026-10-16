@@ -55,6 +55,29 @@
 - Element ids cannot contain apostrophes ("i've" broke the whole inline script). Use keys like 'ive'.
 - `fromTo` renders its from-state immediately: pass `immediateRender:false` for anything hidden until its time.
 - Heavy backdrop-filter/blur on many elements can make captures go black; keep it to a few.
+- Video start times: HyperFrames extracts a video's frames with `ffmpeg -ss <data-media-start>`, which drops a frame
+  that starts even a hair before it. "17.967" (3 decimals, rounded up) lost the frame at 17.9667 s: a chunk restarted
+  at frame 539 after a stall would have shown the a-roll a frame late. Write media starts a quarter frame early
+  (template media_start()). It shows a video while start <= t <= start + duration (both ends): back-to-back videos
+  end half a frame early, or the boundary frame shows both.
+- Chrome's PNG encoder: a png-sequence render captures with optimizeForSpeed false (slow zlib). hf_fastpng.mjs
+  (render.py preloads it into HyperFrames' Node) turns the fast encoder on: bit-identical frames, RGB and alpha,
+  1246 -> 816 ms a frame. The speed line says "normal PNG capture" if a HyperFrames update moved what it patches.
+- The cutout layer costs ~45% of a rendered frame (an RGBA PNG decoded and filtered every frame: 816 vs 447 ms).
+  Where nothing sits behind the head it shows the a-roll's own pixels, so the template leaves it out there.
+- Each render session downloads GSAP from the CDN while compiling. A DNS hiccup ("Failed to download CDN script ...
+  fetch failed", then "sub_timeline_script_failure") fails that session: run it again.
+
+## Speed (measured on a GTX 1650 laptop, 6 cores / 12 threads, 8 GB)
+- One VP9 alpha encoder (crf 12, good, cpu-used 4) keeps ~6 threads busy: ~9.6 frames/s at 1080x1920, ~0.8 GB at
+  its peak. Two side by side ~12 frames/s together, three slower (10). The cutout model: GPU ~15 frames/s, CPU
+  1.6 (one thread per physical core; two sessions add ~13% and ~0.6 GB each: not worth it).
+- `ffprobe -count_frames` decodes the whole file (~20 s for the a-roll and its cutout); `-count_packets` reads only
+  the packets (one per frame in these files) in ~0.1 s.
+- check_cuts: one ffmpeg per cut frame decoded the render up to that frame every time (38 decodes, ~70 s); one
+  `select` over all of them is one pass.
+- assemble: shots cut to lossless intermediates (x264 qp 0 ultrafast) side by side, then one crf 14 encode: a 6 s
+  shot in 1.1 s instead of 5.2 s, and the a-roll is 0.9 dB closer to the original (one lossy pass, not two).
 
 ## Audio
 - Lip sync drifted up to 0.67 s by the end of a 21-cut reel (v1 and v2 of the first storyboard reel): each segment's
@@ -127,8 +150,9 @@
 - A program installed while Claude Code is open is not found until Claude Code is fully quit and reopened (it keeps
   the PATH it started with). setup.py says so when it sees ffmpeg installed but not visible.
 - `npx` is `npx.cmd` there: Python cannot start it by bare name. `HF` and cutout.py start it through node directly.
-- The background cutout has no GPU path on Windows (HyperFrames uses CoreML on Apple Silicon only, CUDA only with
-  `HYPERFRAMES_CUDA=1` and a CUDA build of onnxruntime), so it runs on the CPU. Run it in the background.
+- HyperFrames' own cutout has no GPU path on Windows (CoreML on Apple Silicon only, CUDA only with
+  `HYPERFRAMES_CUDA=1` and a CUDA build of onnxruntime). The skill's matte.py does it instead: CUDA or DirectML after
+  `setup.py --gpu`, every CPU core otherwise. On the CPU it is the slow step: run it in the background.
 - Windows opens text files as cp1252 unless told otherwise: every `open()` in build.py needs `encoding='utf-8'`,
   or accents, curly quotes and emoji in captions come out broken (the page says charset UTF-8).
 - File paths inside an ffmpeg FILTER (subtitles=, movie=, a fonts file) need the drive colon and backslashes

@@ -25,7 +25,9 @@ Look for `SK/config.json`.
 
 **If it exists:** load it (name, instagram handle, default look, folders), run the setup script exactly as in
 step 3 below (a few seconds: it only checks, and repairs the environment after an update), read "This machine",
-and go to Step 1 once it prints READY.
+and go to Step 1 once it prints READY. The user never runs setup themselves: "edit these clips" is enough. If it
+prints `STATUS gpu AVAILABLE`, ask the user once whether to install GPU support (as in step 3) before Step 1:
+the cutout and Whisper then run on the GPU for every edit after.
 
 **If it does not exist:**
 1. Say: "Welcome to /video-edit! Let's get you set up. This takes about 2 minutes and only happens once."
@@ -51,7 +53,7 @@ and go to Step 1 once it prints READY.
      so no edit stalls on a download later. MISSING there is not fatal: the first transcription / cutout retries.
    - `STATUS gpu AVAILABLE` (an NVIDIA GPU, or any DirectX 12 GPU on Windows): ask the user once whether to install
      GPU support (one time, ~1.7 GB with NVIDIA, ~25 MB with DirectML, into the skill folder, no restart), then run
-     `setup.py --gpu`. The cutout then runs ~5x faster and Whisper 3-5x (GTX 1650: cutout 0.97 -> 5.5 frames/s).
+     `setup.py --gpu`. The cutout model then runs ~7x faster and Whisper 3-5x (GTX 1650: ~11 vs ~1.6 frames/s).
      Optional: everything works on the CPU without it. `STATUS gpu OK` says what runs where.
 4. Optional, Apify (pulls reels and profile stats automatically): try a simple Apify MCP call. If it is not
    connected, say it is optional and how to add it:
@@ -76,8 +78,9 @@ exact commands for this computer:
   `.venv/Scripts/python.exe` on Windows). Run EVERY Python script of this skill with it, never a bare `python3`.
 - `HF` = `PY "SK/scripts/hf.py"`: starts the pinned HyperFrames (`npx --yes hyperframes@0.8.34 ...`) with the
   right Node on any OS. No `nvm use`, no `npx.cmd` trouble.
-- `cutout`: `CUDA` / `DML` (GPU support installed: scripts/matte.py, a few minutes), `CoreML` (Apple Silicon) or
-  `CPU` (no GPU help: the cutout is the slow step; say so, run it in the background and keep building).
+- `cutout`: `CUDA` / `DML` (GPU support installed: scripts/matte.py, ~2 min a reel), `CoreML` (Apple Silicon:
+  HyperFrames on the Apple GPU) or `CPU` (scripts/matte.py on every core: ~8 min a reel, the slow step; say so, run
+  it in the background and keep going). Only the frames with something behind the head are cut out.
 - `gpu`: the GPU card and what runs on it (`cutout`, `whisper`), or null.
 
 setup.py rewrites this file on every run (Step 0), so it is always current. File missing, or `PY` no longer
@@ -146,18 +149,19 @@ captions still follow what was said.
 - Post the EDL to the user as a short table (line, shot, look per section) plus what was cut, in the DROPPED report's
   own words ("cut: 'So I was'", never your summary of it), and keep going; do not wait.
 
-### 4. Assemble, align, cut out
+### 4. Assemble, align, head position
 ```bash
 PY SK/scripts/assemble.py <project>          # check_edl first; aroll.mp4 (30fps CFR), segments.json, voice (normalised)
 PY SK/scripts/align.py <project>             # words.json: per-shot word times; exit 1 if a cut clipped a line's ends
-PY SK/scripts/cutout.py <project>            # run in background; asserts cutout frames == aroll frames
-PY SK/scripts/headpos.py <project>           # after the cutout: headpos.json (head top per shot) for placement
+PY SK/scripts/headpos.py <project>           # headpos.json (head top per shot) for placement: 3 masks a shot, no cutout
 PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, cutaways, supers, end card)
 ```
-One heavy job at a time (Whisper, cutout, render, snapshot each want 1-1.5 GB); on a machine with under 8 GB of
-RAM never overlap them. The cutout prints a progress line every 30 seconds (CPU: ~1 frame/s, so ~30 min per minute
-of reel; GPU: ~5.5 frames/s on a GTX 1650, ~6 min; start it as soon as the EDL is locked). Re-assembling later (new in/out points) means a new cutout: settle
-the EDL before starting it. Only an appended tail can be cut out alone and spliced on (gotchas.md).
+assemble.py cuts the shots side by side into lossless intermediates and compresses the a-roll once (~1 min a reel).
+headpos.py runs the cutout model on 3 frames a shot (seconds on a GPU, under a minute on a CPU), so placement no longer
+waits for a cutout. The cutout itself comes after the build (step 6): only the frames where something sits behind the
+head are cut out, and the build is what decides those.
+On a machine with under 8 GB of RAM run one heavy job at a time (Whisper, cutout, render, snapshot each want
+1-1.5 GB). Re-assembling later (new in/out points) means new cutout pieces: cutout.py notices and redoes them.
 
 ### 5. Inserts in parallel (as soon as the EDL is locked)
 For each animated insert the script calls for (an app on screen, the profile follow on the CTA, a file scroll),
@@ -179,21 +183,31 @@ metrics.json, assets/sfx). build.py reads everything the scripts wrote; set its 
 - Multi-look reels, the orbit, creator cards and the Instagram follow insert: borrow the functions from
   `SK/assets/examples/first-reel-build.py` (the first reel's build; its machinery is documented in its docstring).
 - Iterate from the project folder: `HF lint` (0 errors), then `PY build.py --safe`, then
+  `PY SK/scripts/cutout.py <project>` (in the background when it says it has many frames to do), then
   `HF snapshot --at <10-20 moments> --no-end --describe false -o snapshots/vN`. Read the contact sheets, fix layout,
   readability and safe zone. (`HF` picks the right Node by itself, so there is no `nvm use`.)
+- The cutout: build.py writes work/cutout_plan.json, the frames where something sits behind the head (every frame in
+  the cool dude look, which lights the cutout on its own) in pieces of up to 10 s, and its last line says how many
+  pieces are not cut out yet. cutout.py cuts out only those, several at a time; pieces already done are kept and the
+  model's masks are cached per frame, so a rebuild that moves a punch word costs seconds. Snapshots and render.py
+  refuse to run while a piece is missing (the words would sit over the face). One piece per <video>: a frame without
+  anything behind the head skips the cutout layer, ~40% less render time on that frame.
 
 ### 7. Render and QA
 ```bash
 PY build.py                                        # without --safe (grep the html: rgba(255,0,0,.28) must be 0)
+PY SK/scripts/cutout.py <project>                  # only if build.py says pieces are missing
 PY SK/scripts/render.py <project> <slug>-vN        # lossless: PNG frames, browsers in parallel, one x264 encode
 PY SK/scripts/check_cuts.py <project> renders/<slug>-vN.mp4 --phone
 ```
 render.py, not `HF render`: HyperFrames' MP4 path captures JPEG frames (a second lossy step) and its capture can
 stall for good on machines under 8 GB of RAM. render.py hard-links every captured frame, restarts a stalled session
 at the first missing frame, mixes voice + SFX (+ assets/music.* ducked under the voice) and encodes once (crf 12,
-BT.709). It runs as many browsers side by side as the free RAM allows (~0.7 GB each, up to 10) and prints a speed
-line (frames/s, browsers, what the browser drew on). Measured on a 7 GB laptop: 1 browser ~1 frame/s, 3 browsers
-2.3 frames/s.
+BT.709). It runs as many browsers side by side as the free RAM allows (~0.7 GB each, up to 10), has Chrome write its
+lossless PNGs with the fast encoder (same pixels, ~35% less time a frame), encodes while it draws on machines over
+8 GB, and prints a speed line (frames/s, browsers, what the browser drew on). Measured on a 7 GB laptop, 30 frames,
+1 browser: 1246 ms a frame before, 816 with the fast PNGs, 385 on a frame without the cutout layer.
+check_cuts.py reads every cut frame in one pass and makes the phone copy while it checks lip sync (~30 s).
 Look at `work/cut_check.jpg` (make a bigger grid when it is too small to judge): every after-cut frame shows the
 new shot cleanly. check_cuts.py also prints lip sync per shot against the original clip: it must say LIP SYNC OK. Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
 Storyboard pictures: crop a card from a render frame and compare it with its display copy (PSNR > 40 dB).

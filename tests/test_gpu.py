@@ -95,14 +95,41 @@ class Recipe(unittest.TestCase):
         frame = np.full((4, 4, 3), 9, np.uint8)
         y = np.zeros((1, 1, 320, 320), np.float32)
         y[0, 0, :, :] = np.linspace(0, 1, 320, dtype=np.float32)[None, :]
-        rgba = np.frombuffer(matte.compose(frame, y), np.uint8).reshape(4, 4, 4)
+        rgba = np.frombuffer(matte.compose(frame, matte.small_mask(y)), np.uint8).reshape(4, 4, 4)
         self.assertTrue((rgba[..., :3] == 9).all())
         self.assertLess(int(rgba[0, 0, 3]), int(rgba[0, 3, 3]))
+
+    def test_cached_mask_rebuilds_the_same_alpha(self):
+        y = np.random.default_rng(1).normal(size=(1, 1, 320, 320)).astype(np.float32)
+        small = matte.small_mask(y)
+        self.assertEqual(small.shape, (320, 320))
+        self.assertTrue((matte.full_mask(small, 1080, 1920) == matte.mask_of(y, 1080, 1920)).all())
+        with tempfile.TemporaryDirectory() as d:
+            m = matte.Masks(d)
+            self.assertIsNone(m.get(7))
+            m.put(7, small)
+            self.assertTrue((m.get(7) == small).all())   # PNG: lossless
+            self.assertIsNone(matte.Masks(None).get(7))
 
     def test_psnr(self):
         a = np.zeros((8, 8), np.uint8)
         self.assertEqual(matte.psnr(a, a), 99.0)
         self.assertLess(matte.psnr(a, a + 16), matte.SELFTEST_DB)
+
+
+class Pieces(unittest.TestCase):
+    def test_seek_is_a_quarter_frame_early(self):
+        a = matte.decoder_args('ffmpeg', 'in.mp4', 30, 10, 30)
+        self.assertEqual(a[a.index('-ss') + 1], f'{29.75 / 30:.6f}')   # ffmpeg drops a frame that starts before -ss
+        self.assertEqual(a[a.index('-frames:v') + 1], '10')
+        self.assertNotIn('-ss', matte.decoder_args('ffmpeg', 'in.mp4', 0))
+
+    def test_workers_follow_cores_and_ram(self):
+        self.assertEqual(matte.plan_workers(15, 12, 4450), 2)     # the 8 GB laptop with ~4.4 GB free
+        self.assertEqual(matte.plan_workers(15, 16, 50000), 5)    # 64 GB: cores // 3
+        self.assertEqual(matte.plan_workers(1, 16, 50000), 1)     # never more than the pieces
+        self.assertEqual(matte.plan_workers(15, 12, 1500), 1)     # tight: still one
+        self.assertEqual(matte.plan_workers(0, 12, 8000), 0)
 
 
 class Encoder(unittest.TestCase):
