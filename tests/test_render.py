@@ -72,5 +72,22 @@ class Memory(unittest.TestCase):
         self.assertEqual(skillenv.parse_vm_stat(text, 17179869184), (16384, 5000))
 
 
+class FastPng(unittest.TestCase):
+    def test_preload_goes_into_node_options_as_a_file_url(self):
+        env = render.fast_png_env({'NODE_OPTIONS': '--max-old-space-size=4096'})
+        opt = env['NODE_OPTIONS']
+        self.assertTrue(opt.startswith('--max-old-space-size=4096 --import file:'), opt)
+        self.assertTrue(opt.endswith('hf_fastpng.mjs'))
+        self.assertNotIn(' ', opt.split('--import ', 1)[1])   # a file URL: spaces in a user folder are %20
+        self.assertTrue(os.path.isfile(os.path.join(ROOT, 'scripts', 'hf_fastpng.mjs')))
+
+    def test_off_leaves_the_environment_alone(self):
+        self.assertEqual(render.fast_png_env({'A': '1'}, on=False), {'A': '1'})
+
+    def test_log_says_whether_it_engaged(self):
+        self.assertTrue(render.fast_png_on('...\n[fastpng] fast lossless PNG capture on\n...'))
+        self.assertFalse(render.fast_png_on('[fastpng] not applied (x): normal PNG capture'))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

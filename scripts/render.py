@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Final render, lossless until the last step: <project>/renders/<name>.mp4 (+ the frame-exact audio mix).
 
-Usage (after `PY build.py`):  PY render.py <project_dir> <name> [--crf 12] [--keep-frames] [--browsers N]
+Usage (after `PY build.py`):  PY render.py <project_dir> <name> [--crf 12] [--keep-frames] [--browsers N] [--no-fast-png]
 
 Why not `HF render` straight to MP4:
   - its MP4 path captures every frame as JPEG (q95 at --quality high) before encoding: a second lossy step that
@@ -21,6 +21,8 @@ Why not `HF render` straight to MP4:
     pixels of 2 million off by 1/255 on text edges, browser rounding).
   - quality: video frames are extracted for the browser as PNG (--video-frame-format png). HyperFrames' default
     extracts an opaque video (the a-roll) as JPEG: a hidden lossy step on the background in every earlier render.
+  - fast lossless capture: hf_fastpng.mjs (loaded into HyperFrames' Node) switches Chrome to its fast PNG encoder.
+    30 frames, 1 browser: 1246 -> 816 ms a frame, every frame bit-identical (RGB and alpha). --no-fast-png turns it off.
   --browsers N forces the count (benchmarks). The summary line prints frames/s, browsers and what the browser drew on.
 
 Needs build.py to support `--range A B` (writes chunk_<first frame>.html covering [A, B), no audio elements) and to
@@ -107,6 +109,20 @@ def drawing_on(log_text):
     return m.group(1) + (f': {m.group(2).strip()}' if m.group(2) else '')
 
 
+def fast_png_env(env, on=True):
+    """env for HyperFrames with hf_fastpng.mjs preloaded (NODE_OPTIONS --import, a file URL: no spaces to quote)"""
+    env = dict(env)
+    mod = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'hf_fastpng.mjs')
+    if on and os.path.isfile(mod):
+        import pathlib
+        env['NODE_OPTIONS'] = (env.get('NODE_OPTIONS', '') + ' --import ' + pathlib.Path(mod).as_uri()).strip()
+    return env
+
+
+def fast_png_on(log_text):
+    return '[fastpng] fast lossless PNG capture on' in log_text
+
+
 def link(src, dst):
     try:
         os.link(src, dst)
@@ -114,7 +130,7 @@ def link(src, dst):
         shutil.copyfile(src, dst)
 
 
-def frames_of(proj, name, total, force=None, stats=None):
+def frames_of(proj, name, total, force=None, stats=None, fast=True):
     cdir, safe = os.path.join(proj, 'renders', f'{name}_work'), os.path.join(proj, 'renders', f'{name}_frames')
     os.makedirs(safe, exist_ok=True)
     have = lambda n: os.path.exists(os.path.join(safe, f'{n:05d}.png'))
@@ -140,6 +156,7 @@ def frames_of(proj, name, total, force=None, stats=None):
                                                   os.path.relpath(os.path.join(cdir, f's{start:05d}'), proj), '--quality', 'high',
                                                   '--video-frame-format', 'png', '--workers', str(browsers)]
                                                  + (['--no-low-memory-mode'] if browsers > 1 else []))
+        env = fast_png_env(env, fast)
         env.setdefault('HF_DE_STALL_MS', '120000')   # our own watchdog acts first
         before_dirs, before_chrome = set(glob.glob(os.path.join(cdir, 'work-*'))), chrome_pids()
         print(f'session from frame {start} ({start / 30:.2f}s): {end - start} frames, {browsers} browser{"s" * (browsers > 1)}'
@@ -177,8 +194,9 @@ def frames_of(proj, name, total, force=None, stats=None):
                 link(p, dst)
         dt = time.time() - t0
         with open(log, encoding='utf-8', errors='replace') as fh:
-            drew = drawing_on(fh.read())
-        stats.append({'frames': got, 'seconds': dt, 'browsers': browsers, 'drawing': drew})
+            text = fh.read()
+        drew = drawing_on(text)
+        stats.append({'frames': got, 'seconds': dt, 'browsers': browsers, 'drawing': drew, 'fast_png': fast_png_on(text)})
         print(f'   +{got} frames ({dt:.0f}s, {got / max(dt, .01):.2f} frames/s, drawing on {drew})', flush=True)
         if os.path.exists(os.path.join(proj, html)):
             os.remove(os.path.join(proj, html))
@@ -224,7 +242,7 @@ def main():
     t0 = time.time()
     force = int(sys.argv[sys.argv.index('--browsers') + 1]) if '--browsers' in sys.argv else None
     stats = []
-    safe = frames_of(proj, name, total, force, stats)
+    safe = frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv)
     t_frames = time.time() - t0
     wav = os.path.join(proj, 'work', f'{name}_audio.wav')
     music = audio_mix(proj, reel, wav)
@@ -246,7 +264,7 @@ def main():
     if drawn:   # the numbers to compare machines and versions by
         print(f"speed: {drawn} frames drawn in {t_frames / 60:.1f} min ({drawn / t_frames:.2f} frames/s), "
               f"{len(stats)} session(s), browsers {'/'.join(str(b) for b in dict.fromkeys(s['browsers'] for s in stats))}, "
-              f"drawing on {stats[0]['drawing']}; audio + encode {(time.time() - t0 - t_frames) / 60:.1f} min")
+              f"drawing on {stats[0]['drawing']}, {'fast' if all(s['fast_png'] for s in stats) else 'normal'} PNG capture; audio + encode {(time.time() - t0 - t_frames) / 60:.1f} min")
 
 
 if __name__ == '__main__':
