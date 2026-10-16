@@ -25,7 +25,9 @@ Look for `SK/config.json`.
 
 **If it exists:** load it (name, instagram handle, default look, folders), run the setup script exactly as in
 step 3 below (a few seconds: it only checks, and repairs the environment after an update), read "This machine",
-and go to Step 1 once it prints READY.
+and go to Step 1 once it prints READY. The user never runs setup themselves: "edit these clips" is enough. If it
+prints `STATUS gpu AVAILABLE`, ask the user once whether to install GPU support (as in step 3) before Step 1:
+the cutout and Whisper then run on the GPU for every edit after.
 
 **If it does not exist:**
 1. Say: "Welcome to /video-edit! Let's get you set up. This takes about 2 minutes and only happens once."
