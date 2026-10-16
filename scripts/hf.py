@@ -34,4 +34,8 @@ if __name__ == '__main__':
         gone = missing_media(page)
         if gone:
             sys.exit(f'{len(gone)} cutout pieces not cut out yet ({gone[0]} ...): run cutout.py first')
-    sys.exit(skillenv.run_hyperframes(sys.argv[1:]))
+    code = skillenv.run_hyperframes(sys.argv[1:])
+    if code and sys.argv[1] == 'snapshot':   # a page that loads GSAP from the CDN can miss its 10 s navigation timeout
+        print('snapshot failed once (often a slow network moment): trying again', flush=True)
+        code = skillenv.run_hyperframes(sys.argv[1:])
+    sys.exit(code)
