@@ -107,6 +107,17 @@ def hyperframes_piece(proj, aroll, a, b, out):
     os.replace(part, out)
 
 
+def gpu_left_unused(rec, providers):
+    """a line to print when this machine has a GPU the cutout could use but GPU support is missing or broken, else
+    None (the first Windows render cut out on the CPU on a PC with an 8 GB NVIDIA card)"""
+    gpu = (rec or {}).get('gpu') or {}
+    if gpu.get('path') not in ('cuda', 'dml') or {'CUDAExecutionProvider', 'DmlExecutionProvider'} & set(providers):
+        return None
+    card = gpu.get('card') or 'this GPU'
+    return (f'cutout: on the CPU although {card} is here (GPU support missing or not working). '
+            f'Run setup.py --gpu once (no restart): the cutout runs ~5x faster after that')
+
+
 def device_arg(argv):
     return argv[argv.index('--device') + 1] if '--device' in argv else 'auto'
 
@@ -146,6 +157,11 @@ def main():
     if engine == 'ours' and not (matte.ort_ready() and os.path.isfile(matte.MODEL)):
         print('cutout: onnxruntime or the model is missing here: HyperFrames does it (run setup.py to fix)')
         engine = 'hyperframes'
+    if engine == 'ours' and device_arg(sys.argv) == 'auto':
+        import onnxruntime
+        hint = gpu_left_unused(skillenv.load(), onnxruntime.get_available_providers())
+        if hint:
+            print(hint, flush=True)
     flags = ('--engine', '--workers')
     extra = [x for i, x in enumerate(sys.argv[2:], 2) if x not in flags and sys.argv[i - 1] not in flags]
     plan_file = os.path.join(proj, 'work', 'cutout_plan.json')

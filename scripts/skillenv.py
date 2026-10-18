@@ -461,7 +461,7 @@ def cuda_lib_dirs(roots=None, windows=None):
 
 def load_cuda_libs():
     """make the venv's NVIDIA libraries (CUDA 12 + cuDNN 9) visible to Whisper and onnxruntime in this process.
-    Linux: load them once, globally, top level first; Windows: add their folders to the DLL search path.
+    Linux: load them once, globally, top level first; Windows: their folders on the DLL search path and on PATH.
     No-op when they are not installed. Nothing system-wide, no restart."""
     if _CUDA_LOADED:
         return _CUDA_LOADED[0]
@@ -470,6 +470,9 @@ def load_cuda_libs():
     if dirs and os.name == 'nt':
         for d in dirs:
             os.add_dll_directory(d)
+        # Whisper's CTranslate2 loads cuBLAS / cuDNN later with a plain LoadLibrary, which searches PATH but not the
+        # folders above: without this a "CUDA" Whisper falls over to the CPU (or dies) at its first transcription
+        os.environ['PATH'] = os.pathsep.join(dirs + [os.environ.get('PATH', '')])
         ok = True
     elif dirs:
         import ctypes

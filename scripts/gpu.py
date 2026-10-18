@@ -79,11 +79,30 @@ def cutout_device(path):
     return out[-1].split()[1] if out and out[-1].split()[1] == path else None
 
 
+WHISPER_TEST = (
+    'import sys; sys.path.insert(0, %r); import skillenv, numpy as np\n'
+    'dev = skillenv.whisper_device()\n'
+    'if dev == "cuda":\n'
+    '    from faster_whisper import WhisperModel\n'
+    '    try:\n'
+    '        m = WhisperModel("small.en", device="cuda", compute_type="int8", local_files_only=True)\n'
+    '    except Exception:\n'
+    '        m = None   # model not downloaded yet: the library check has to do\n'
+    '    if m is not None:   # cuBLAS / cuDNN are only loaded by the first transcription\n'
+    '        list(m.transcribe(np.zeros(16000, np.float32), beam_size=1, without_timestamps=True)[0])\n'
+    'print("DEV", dev)')
+
+
 def whisper_device():
-    r = subprocess.run([sys.executable, '-c', 'import sys; sys.path.insert(0, %r); import skillenv; print("DEV", skillenv.whisper_device())'
-                        % os.path.dirname(os.path.abspath(__file__))], timeout=120, **skillenv.TEXT)
+    """'cuda' only when Whisper really transcribes there: one second of silence through small.en on the GPU. The
+    library check alone passed on a Windows PC whose first real transcription then could not load cuBLAS."""
+    try:
+        r = subprocess.run([sys.executable, '-c', WHISPER_TEST % os.path.dirname(os.path.abspath(__file__))], timeout=180,
+                           **skillenv.TEXT)
+    except subprocess.TimeoutExpired:
+        return 'cpu'
     out = [l for l in r.stdout.splitlines() if l.startswith('DEV ')]
-    return out[-1].split()[1] if out else 'cpu'
+    return out[-1].split()[1] if out and r.returncode == 0 else 'cpu'
 
 
 def pip(args):

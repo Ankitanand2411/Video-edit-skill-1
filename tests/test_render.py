@@ -112,5 +112,35 @@ class Assemble(unittest.TestCase):
         self.assertEqual(assemble.shots_at_once(20, None), 1)
 
 
+class WindowsRender(unittest.TestCase):
+    """the first Windows render crashed: frames never seen (work folder in %TEMP%) and Node out of heap"""
+
+    def test_node_heap_grows_with_the_browsers(self):
+        self.assertEqual(render.node_heap_mb(1), 1024 + 768)
+        self.assertEqual(render.node_heap_mb(10), 1024 + 7680)   # HyperFrames' own plan: 1024 + 640 a browser
+        env = render.heap_env({'NODE_OPTIONS': '--import file:///x.mjs'}, 5)
+        self.assertEqual(env['NODE_OPTIONS'], f'--import file:///x.mjs --max-old-space-size={render.node_heap_mb(5)}')
+        self.assertEqual(render.heap_env({'NODE_OPTIONS': '--max-old-space-size=30000'}, 5)['NODE_OPTIONS'],
+                         '--max-old-space-size=30000')          # a bigger heap the user set stays
+        self.assertEqual(render.heap_env({'NODE_OPTIONS': '--max-old-space-size=512'}, 2)['NODE_OPTIONS'],
+                         f'--max-old-space-size={render.node_heap_mb(2)}')
+
+    def test_frames_are_found_in_the_temp_folder_and_retries(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as cdir:
+            tmp_work = tempfile.mkdtemp(prefix='hf-render-')   # where HyperFrames works on Windows
+            try:
+                os.makedirs(os.path.join(cdir, 'work-abc-1', 'captured-frames'))
+                self.assertIn(tmp_work, render.work_dirs(cdir))
+                self.assertIn(os.path.join(cdir, 'work-abc-1'), render.work_dirs(cdir))
+                for d in ('captured-frames', os.path.join('capture-attempt-1', 'worker-0'), 'retry-1-batch-0-worker-2'):
+                    os.makedirs(os.path.join(tmp_work, d), exist_ok=True)
+                    open(os.path.join(tmp_work, d, 'frame_000007.png'), 'w').close()
+                self.assertEqual(len(render.live_frames(tmp_work)), 3)
+            finally:
+                import shutil
+                shutil.rmtree(tmp_work, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

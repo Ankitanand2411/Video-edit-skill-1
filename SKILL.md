@@ -27,7 +27,9 @@ Look for `SK/config.json`.
 step 3 below (a few seconds: it only checks, and repairs the environment after an update), read "This machine",
 and go to Step 1 once it prints READY. The user never runs setup themselves: "edit these clips" is enough. If it
 prints `STATUS gpu AVAILABLE`, ask the user once whether to install GPU support (as in step 3) before Step 1:
-the cutout and Whisper then run on the GPU for every edit after.
+the cutout and Whisper then run on the GPU for every edit after. If it prints `STATUS skill NOT WHERE CLAUDE CODE
+LOOKS` (the folder was unzipped somewhere like the Desktop, so /video-edit does not trigger), offer
+`setup.py --link`: a link from ~/.claude/skills/video-edit to the folder, nothing copied.
 
 **If it does not exist:**
 1. Say: "Welcome to /video-edit! Let's get you set up. This takes about 2 minutes and only happens once."
@@ -192,6 +194,8 @@ metrics.json, assets/sfx). build.py reads everything the scripts wrote; set its 
   model's masks are cached per frame, so a rebuild that moves a punch word costs seconds. Snapshots and render.py
   refuse to run while a piece is missing (the words would sit over the face). One piece per <video>: a frame without
   anything behind the head skips the cutout layer, ~40% less render time on that frame.
+- `SMALL behind-head words` after a build: a high head in a close-up left no room above it. Move that punch word to a
+  wider shot or set it in front, before cutting out and snapshotting.
 
 ### 7. Render and QA
 ```bash
