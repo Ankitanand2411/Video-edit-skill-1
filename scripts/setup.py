@@ -13,6 +13,9 @@ Run it with whichever Python the machine has:   python3 setup.py   |   python se
   6. GPU support (optional, scripts/gpu.py): reported every run; `setup.py --gpu` installs it into the skill folder
      (NVIDIA: CUDA libraries + onnxruntime-gpu, ~1.7 GB; other Windows GPUs: onnxruntime-directml, ~25 MB; Mac:
      nothing to install). No restart. Without it everything runs on the CPU as before.
+  7. Where the skill sits: Claude Code only finds it in ~/.claude/skills/<name>/ (a project's .claude/skills/ too).
+     A copy unzipped on the Desktop works by hand but /video-edit does not trigger it: `setup.py --link` makes
+     ~/.claude/skills/video-edit point here (a link: nothing copied, the venv and GPU support stay valid).
 
 Prints a STATUS line per item, each with the fix for THIS machine, then READY or NOT READY. Exit code 0 only when
 everything is ready. Writes <skill>/.platform.json (os, arch, the venv Python, how to start npx) so the other
@@ -229,6 +232,48 @@ def check_sfx():
     return not missing
 
 
+# ------------------------------------------------------------------ 7. where Claude Code finds the skill
+def skills_home():
+    return os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'video-edit')
+
+
+def found_by_claude(skill_dir, home):
+    """True when Claude Code loads this folder as a skill: it sits in a .claude/skills/ folder, or `home` is (a link
+    to) it"""
+    parent = os.path.dirname(os.path.abspath(skill_dir))
+    if os.path.basename(parent) == 'skills' and os.path.basename(os.path.dirname(parent)) == '.claude':
+        return True
+    return os.path.exists(home) and os.path.realpath(home) == os.path.realpath(skill_dir)
+
+
+def link_skill(skill_dir, home):
+    """home -> skill_dir: a junction on Windows (no admin rights needed), a symlink elsewhere. Never replaces anything."""
+    if os.path.lexists(home):
+        return False, f'{home} already exists (another copy of the skill?): left alone'
+    os.makedirs(os.path.dirname(home), exist_ok=True)
+    if os.name == 'nt':
+        r = subprocess.run(['cmd', '/c', 'mklink', '/J', home, os.path.abspath(skill_dir)], **skillenv.TEXT)
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+    os.symlink(os.path.abspath(skill_dir), home, target_is_directory=True)
+    return True, ''
+
+
+def check_skill_home():
+    home = skills_home()
+    if found_by_claude(skillenv.SKILL_DIR, home):
+        say('STATUS skill OK: Claude Code finds it (/video-edit or "edit these clips" starts it)')
+        return
+    if '--link' in sys.argv:
+        ok, msg = link_skill(skillenv.SKILL_DIR, home)
+        if ok:
+            say(f'STATUS skill linked: {home} -> {skillenv.SKILL_DIR}. Start a new Claude Code session so it lists /video-edit')
+            return
+        say(f'STATUS skill NOT LINKED: {msg}')
+        return
+    say(f'STATUS skill NOT WHERE CLAUDE CODE LOOKS ({skillenv.SKILL_DIR}): /video-edit will not start it. Fix (1 s, '
+        f'nothing copied): setup.py --link  -> {home}')
+
+
 # ------------------------------------------------------------------ main
 def main():
     skillenv.utf8_stdio()
@@ -257,6 +302,7 @@ def main():
                 gpu = json.loads(line[4:])
             elif line.strip():
                 say(line)
+    check_skill_home()   # 7. optional for READY: the skill also works when its SKILL.md is read by hand
     ready = ff_ok and node_ok and py_ok
 
     sp = skillenv.shell_path

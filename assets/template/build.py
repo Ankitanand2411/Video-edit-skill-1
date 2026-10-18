@@ -144,6 +144,25 @@ def caps_top(sid):
     return round(max(228, min(CAPS_MAX[shot(sid)], min(head_samples(sid)) + (.2 * xh - 1.05 * cap) * s0 - CAP_LH - 24)))
 
 
+SMALL = .55        # a behind-head word under 55% of the look's size reads as a mistake: build.py says so
+SMALL_WORDS = []
+IG_COLUMN_X, IG_COLUMN_Y, IG_BOTTOM = 980, 1155, 1470   # Instagram's like / comment / share column, caption bar
+
+
+def under_card(text, it, win):
+    """-> (size, top) of a punch word in front, under a cutaway card. Centred and up to SERIF_W wide, it ran into
+    Instagram's like / comment / share column (x 980+ from y 1155) when the card sat low: there it keeps inside
+    x 100-980. No room left above the caption bar (y 1470): above the card instead."""
+    w1 = text_width(text, 1, PU['font_it'] if it else PU['font'], PU['track'], .04)
+    size = int(min(150, SERIF_W / w1))
+    top = win['y'] + win['h'] + 2 * BORDER + 16
+    if top + size * PU['lh'] > IG_COLUMN_Y:
+        size = int(min(size, 2 * (IG_COLUMN_X - 540) / w1))
+    if top + size * PU['lh'] > IG_BOTTOM:
+        top = max(220, round(win['y'] - 16 - size * PU['lh']))
+    return size, top
+
+
 def behind_head(sid, a, b, text, it):
     """-> (top, size) of a punch word tucked behind the head while it is on screen"""
     k, xh, cap = pmet(it)
@@ -604,8 +623,7 @@ def core():
         b = min(END[sid], nxt - .02, a + 1.9) if END[sid] < DUR - .01 else min(nxt - .02, DUR)
         if win:   # over a cutaway: the word sits in front, under the card
             b = min(b, win['b'])
-            size = int(min(150, SERIF_W / text_width(text, 1, PU['font_it'] if it else PU['font'], PU['track'], .04)))
-            top = win['y'] + win['h'] + 2 * BORDER + 16
+            size, top = under_card(text, it, win)
             front_html.append(punch_div(f's{k}', text, it, top, size, 'pw front'))
             POS[text] = (top, size, True, PU['font_it'] if it else PU['font'], a, b)
             tw += punch_in(f'#s{k}', a)
@@ -616,6 +634,8 @@ def core():
             tw += script_in(f'#s{k}', a, len(text))
         else:
             top, size = behind_head(sid, a, b, text, it)
+            if size < SMALL * PU['size'][shot(sid)]:   # a high head in a close-up leaves no room: say so now, not after the render
+                SMALL_WORDS.append(f"{sid} {text!r}: only {size}px behind the head (head top y {min(head_at(sid, a), head_at(sid, b)):.0f})")
             back_html.append(punch_div(f's{k}', text, it, top, size))
             POS[text] = (top, size, False, PU['font_it'] if it else PU['font'], a, b)
             tw += punch_in(f'#s{k}', a)
@@ -976,6 +996,10 @@ if '--plan' in sys.argv:
         print(f"cutaway {c['id']:8s} {c['a']:6.2f}-{c['b']:6.2f}  " + (f"{c['w']}x{c['h']} at ({c['x']},{c['y']}) {c['image']}" if c['kind'] == 'card' else 'split'))
 print(f"wrote {OUT}  look {LOOK}  reel {REEL_DUR:.3f}s (a-roll {DUR:.3f}s)  {len(CUTS)} cuts  {len(PUNCHES)} punch words"
       + (f"  {len(CUTAWAYS)} cutaways  {len(SUPERS)} supers{'  end card' if ENDC else ''}" if PLAN else ''))
+if not RANGE and SMALL_WORDS:
+    print('SMALL behind-head words (a high head in a close-up): pick a word on a wider shot, or set it in front:')
+    for _w in SMALL_WORDS:
+        print('  ' + _w)
 if not RANGE:
     _missing = [piece_file(a, b) for a, b in PIECES if not os.path.isfile(piece_file(a, b))]
     print(f"cutout: {sum(b - a for a, b in PIECES)} of {FRAMES} frames in {len(PIECES)} pieces"

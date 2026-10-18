@@ -27,6 +27,10 @@ Why not `HF render` straight to MP4:
   - encode while drawing (machines over 8 GB): x264 takes each frame as it lands, at low priority, so the encode is
     done a few seconds after the last frame instead of ~2 min later. On 8 GB and less it runs after the drawing, as
     before: its ~0.5 GB would cost a browser, which costs more than it saves. --no-overlap turns it off.
+  - Windows (the crash of the first Windows render): HyperFrames keeps its work folder in %TEMP% (hf-render-*) there,
+    not next to the output, so the frames were never seen arriving and every session was killed as stalled; both
+    places are watched now. And it budgets 640 MB of Node heap per browser (+1 GB) but skips its own warning when
+    --workers is given: several browsers ran Node out of heap. NODE_OPTIONS --max-old-space-size is raised to match.
   --browsers N forces the count (benchmarks). The summary line prints frames/s, browsers and what the browser drew on.
 
 Needs build.py to support `--range A B` (writes chunk_<first frame>.html covering [A, B), no audio elements) and to
@@ -42,6 +46,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -50,6 +55,7 @@ import skillenv  # noqa: E402
 STALL, BOOT, SESSION = 40, 180, 150    # s without a new frame / s to the first frame / max frames per session (8 GB and less)
 PER_BROWSER_MB, RESERVE_MB, MAX_BROWSERS = 700, 1000, 10   # see plan_browsers
 LOW_MEM_MB = 8192                      # HyperFrames' own low-memory threshold (total RAM)
+HEAP_RESERVED_MB, HEAP_PER_BROWSER_MB = 1024, 768   # Node heap: HyperFrames plans 1024 + 640 a browser; fast PNGs are ~20% bigger
 MUSIC_GAIN = 0.20                      # music bed under the voice (before ducking): ~-14 dB, then ducked ~8 dB more
 
 
@@ -123,6 +129,38 @@ def fast_png_env(env, on=True):
     return env
 
 
+def node_heap_mb(browsers):
+    """V8 heap for HyperFrames' Node with this many browsers. It plans 1024 MB + 640 MB a browser itself, but only
+    warns (and never raises it) when the browser count is left to it: with --workers, 5+ browsers died with
+    "JavaScript heap out of memory" on a Windows PC."""
+    return HEAP_RESERVED_MB + HEAP_PER_BROWSER_MB * max(1, browsers)
+
+
+def heap_env(env, browsers):
+    """NODE_OPTIONS with a big enough heap; a bigger --max-old-space-size the user set stays"""
+    env = dict(env)
+    opts = env.get('NODE_OPTIONS', '')
+    have = [int(x) for x in re.findall(r'--max-old-space-size=(\d+)', opts)]
+    want = node_heap_mb(browsers)
+    if not have or max(have) < want:
+        opts = re.sub(r'\s*--max-old-space-size=\d+', '', opts)
+        env['NODE_OPTIONS'] = (opts + f' --max-old-space-size={want}').strip()
+    return env
+
+
+def work_dirs(cdir):
+    """HyperFrames' render work folders: next to the output on macOS / Linux, %TEMP%\\hf-render-* on Windows"""
+    return set(glob.glob(os.path.join(cdir, 'work-*'))) | set(glob.glob(os.path.join(tempfile.gettempdir(), 'hf-render-*')))
+
+
+def live_frames(wd):
+    """frames a running session has finished so far, in all the places HyperFrames writes them: one browser
+    (captured-frames), several (capture-attempt-*/worker-*), and a retried range (retry-*-batch-*-worker-*)"""
+    return (glob.glob(os.path.join(wd, 'captured-frames', 'frame_*.png'))
+            + glob.glob(os.path.join(wd, 'capture-attempt-*', 'worker-*', 'frame_*.png'))
+            + glob.glob(os.path.join(wd, 'retry-*-batch-*-worker-*', 'frame_*.png')))
+
+
 def fast_png_on(log_text):
     return '[fastpng] fast lossless PNG capture on' in log_text
 
@@ -160,9 +198,9 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
                                                   os.path.relpath(os.path.join(cdir, f's{start:05d}'), proj), '--quality', 'high',
                                                   '--video-frame-format', 'png', '--workers', str(browsers)]
                                                  + (['--no-low-memory-mode'] if browsers > 1 else []))
-        env = fast_png_env(env, fast)
+        env = heap_env(fast_png_env(env, fast), browsers)
         env.setdefault('HF_DE_STALL_MS', '120000')   # our own watchdog acts first
-        before_dirs, before_chrome = set(glob.glob(os.path.join(cdir, 'work-*'))), chrome_pids()
+        before_dirs, before_chrome = work_dirs(cdir), chrome_pids()
         print(f'session from frame {start} ({start / 30:.2f}s): {end - start} frames, {browsers} browser{"s" * (browsers > 1)}'
               f' ({avail_mb or "?"} MB free of {total_mb or "?"})', flush=True)
         got, t0 = 0, time.time()
@@ -172,9 +210,8 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
             last_new = time.time()
             while proc.poll() is None:
                 time.sleep(2)
-                for wd in set(glob.glob(os.path.join(cdir, 'work-*'))) - before_dirs:
-                    for p in (glob.glob(os.path.join(wd, 'captured-frames', 'frame_*.png'))
-                              + glob.glob(os.path.join(wd, 'capture-attempt-*', 'worker-*', 'frame_*.png'))):
+                for wd in work_dirs(cdir) - before_dirs:
+                    for p in live_frames(wd):
                         n = frame_index(p, start)
                         if n < end and not have(n) and complete_png(p):
                             link(p, os.path.join(safe, f'{n:05d}.png')); got += 1; last_new = time.time()

@@ -65,6 +65,12 @@
   1246 -> 816 ms a frame. The speed line says "normal PNG capture" if a HyperFrames update moved what it patches.
 - The cutout layer costs ~45% of a rendered frame (an RGBA PNG decoded and filtered every frame: 816 vs 447 ms).
   Where nothing sits behind the head it shows the a-roll's own pixels, so the template leaves it out there.
+- A high head in a close-up leaves little room above it for a behind-head word: the template shrinks the word to
+  fit, down to unreadable, and that was only seen in snapshots after the cutout (8 minutes on one edit). build.py
+  now prints `SMALL behind-head words` with the shot and head height the moment it builds (headpos.py runs right
+  after assemble): move the word to a wider shot or set it in front.
+- A punch word under a cutaway card is centred and up to 960 px wide: below y 1155 it ran into Instagram's
+  like / comment / share column (x 980+). The template keeps it inside x 100-980 there (under_card()).
 - Each render session downloads GSAP from the CDN while compiling. A DNS hiccup ("Failed to download CDN script ...
   fetch failed", then "sub_timeline_script_failure") fails that session: run it again.
 
@@ -164,3 +170,19 @@
   (the cutout loads the same library); antivirus can make ffmpeg fail once with `spawn EBUSY`. Retry once, then
   tell the user what Windows blocked.
 - Windows on ARM (Snapdragon): the transcription engine has no ARM build; setup.py asks for the x64 Python.
+- The first Windows render (64 GB PC, 8 GB NVIDIA) crashed twice, for two reasons render.py now handles:
+  1. HyperFrames keeps its render work folder in %TEMP%\\hf-render-* on Windows (next to the output elsewhere).
+     render.py watched only next to the output, saw no frame arrive and killed every session as stalled. It watches
+     both now.
+  2. HyperFrames plans 640 MB of Node heap per browser (+1 GB) but only warns when it picks the browser count
+     itself; with --workers N, 5+ browsers ran Node out of heap ("JavaScript heap out of memory"). render.py sets
+     NODE_OPTIONS --max-old-space-size to 1024 + 768 MB a browser.
+- Whisper on CUDA (Windows): CTranslate2 loads cuBLAS / cuDNN with a plain LoadLibrary at the first transcription,
+  which searches PATH but not os.add_dll_directory folders. The library check passed and the work still fell over;
+  skillenv puts the venv's NVIDIA folders on PATH too, and gpu.py's check transcribes 1 s of silence on the GPU.
+- That same edit ran its cutout and Whisper on the CPU: GPU support was installed only afterwards. setup.py's
+  `STATUS gpu AVAILABLE` must be answered before the first edit (SKILL.md Step 0, both branches), and cutout.py
+  says so when it runs on the CPU beside an unused GPU.
+- A skill unzipped on the Desktop (Video-edit-skill-1-main) is not found by Claude Code: /video-edit does not
+  trigger and SKILL.md gets read by hand. `setup.py --link` points ~/.claude/skills/video-edit at it (a junction:
+  no admin rights, nothing copied, the venv and GPU support stay valid).

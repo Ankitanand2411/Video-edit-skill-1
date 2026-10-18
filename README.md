@@ -124,6 +124,10 @@ Update the video-edit skill from https://github.com/Ankitanand2411/Video-edit-sk
 
 Or in Terminal / PowerShell: `git -C "$HOME/.claude/skills/video-edit" pull`
 
+Downloaded the ZIP instead (a folder like `Video-edit-skill-1-main` on your Desktop)? Claude Code only finds skills in
+`~/.claude/skills/`. Run `python setup.py --link` from the folder's `scripts` (or ask Claude to): it links
+`~/.claude/skills/video-edit` to that folder, so `/video-edit` works. Nothing is copied.
+
 ---
 
 ## Credits

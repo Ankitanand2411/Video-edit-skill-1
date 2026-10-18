@@ -36,6 +36,11 @@ class Plan(unittest.TestCase):
         self.assertEqual(gpu.packages('dml'), ['onnxruntime-directml==1.22.0'])
         self.assertEqual(gpu.packages(None), [])
 
+    def test_whisper_check_really_transcribes(self):
+        code = gpu.WHISPER_TEST % '/skill/scripts'
+        compile(code, 'whisper-test', 'exec')
+        self.assertIn('transcribe', code)   # cuBLAS / cuDNN load only at the first transcription (Windows)
+
     def test_nvidia_smi(self):
         self.assertEqual(gpu.parse_nvidia_smi('NVIDIA GeForce GTX 1650, 4096 MiB, 595.99.02\n'),
                          {'name': 'NVIDIA GeForce GTX 1650', 'vram_mb': 4096, 'driver': '595.99.02'})

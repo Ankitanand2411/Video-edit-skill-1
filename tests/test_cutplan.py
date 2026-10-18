@@ -24,7 +24,7 @@ try:
 except ImportError:   # plain python3 without the venv
     np = headpos = None
 
-NAMES = {'CUT_MARGIN', 'CUT_MERGE', 'CUT_PIECE', 'FPS', 'NOT_ZERO', 'ZERO', 'html_ids', 'hides', 'shown_windows',
+NAMES = {'IG_COLUMN_X', 'IG_COLUMN_Y', 'IG_BOTTOM', 'under_card', 'CUT_MARGIN', 'CUT_MERGE', 'CUT_PIECE', 'FPS', 'NOT_ZERO', 'ZERO', 'html_ids', 'hides', 'shown_windows',
          'cut_pieces', 'piece_file', 'floor6', 'media_start', 'cut_videos'}
 
 
@@ -37,7 +37,8 @@ def template():
             keep.append(node)
         elif isinstance(node, ast.Assign) and any(n.id in NAMES for t in node.targets for n in ast.walk(t) if isinstance(n, ast.Name)):
             keep.append(node)
-    ns = {'re': re}
+    ns = {'re': re, 'SERIF_W': 960, 'BORDER': 8, 'PU': {'font': 'f', 'font_it': 'f', 'track': 0, 'lh': 1.0},
+          'text_width': lambda text, size, font, track=0, pad=0: size * .5 * len(text)}   # 0.5 em a letter
     exec(compile(ast.Module(body=keep, type_ignores=[]), 'build.py', 'exec'), ns)
     return ns
 
@@ -224,6 +225,44 @@ class Whisper(unittest.TestCase):
     def test_physical_cores(self):
         n = skillenv.physical_cores()
         self.assertTrue(1 <= n <= (os.cpu_count() or 1))
+
+
+class SafeZone(unittest.TestCase):
+    def test_word_under_a_low_card_stays_out_of_the_like_column(self):
+        long_word = 'handwriting.'   # 6 em wide in the stub: 150 px -> 900 px, past x 980 when centred
+        size, top = T['under_card'](long_word, True, {'y': 900, 'h': 300})
+        self.assertGreater(top + size, 1155)
+        self.assertLessEqual(540 + size * .5 * len(long_word) / 2, 980)
+        size, top = T['under_card'](long_word, True, {'y': 300, 'h': 300})   # high card: room, full size
+        self.assertEqual(size, 150)
+        size, top = T['under_card']('kids', False, {'y': 1100, 'h': 300})   # no room above y 1470: above the card
+        self.assertLess(top + size, 1100)
+        self.assertGreaterEqual(top, 220)
+
+
+class GpuHints(unittest.TestCase):
+    def test_cpu_cutout_beside_an_unused_gpu_says_so(self):
+        rec = {'gpu': {'card': 'NVIDIA GeForce RTX 4060', 'path': 'cuda', 'cutout': None, 'whisper': 'cpu'}}
+        self.assertIn('setup.py --gpu', cutout.gpu_left_unused(rec, ['CPUExecutionProvider']))
+        self.assertIsNone(cutout.gpu_left_unused(rec, ['CUDAExecutionProvider', 'CPUExecutionProvider']))
+        self.assertIsNone(cutout.gpu_left_unused({'gpu': {'path': None}}, ['CPUExecutionProvider']))   # no GPU: quiet
+        self.assertIsNone(cutout.gpu_left_unused({}, ['CPUExecutionProvider']))
+
+
+class SkillHome(unittest.TestCase):
+    def test_found_by_claude_and_link(self):
+        import setup
+        with tempfile.TemporaryDirectory() as d:
+            desktop = os.path.join(d, 'Desktop', 'Video-edit-skill-1-main')
+            os.makedirs(desktop)
+            home = os.path.join(d, 'home', '.claude', 'skills', 'video-edit')
+            self.assertFalse(setup.found_by_claude(desktop, home))
+            self.assertTrue(setup.found_by_claude(os.path.join(d, '.claude', 'skills', 'video-edit'), home))
+            if os.name != 'nt':
+                ok, _ = setup.link_skill(desktop, home)
+                self.assertTrue(ok)
+                self.assertTrue(setup.found_by_claude(desktop, home))
+                self.assertFalse(setup.link_skill(desktop, home)[0])   # never replaces anything
 
 
 if __name__ == '__main__':
