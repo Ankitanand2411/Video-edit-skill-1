@@ -78,7 +78,10 @@
 - A punch word under a cutaway card is centred and up to 960 px wide: below y 1155 it ran into Instagram's
   like / comment / share column (x 980+). The template keeps it inside x 100-980 there (under_card()).
 - Each render session downloads GSAP from the CDN while compiling. A DNS hiccup ("Failed to download CDN script ...
-  fetch failed", then "sub_timeline_script_failure") fails that session: run it again.
+  fetch failed", then "sub_timeline_script_failure") fails that session. Worse, the frames that browser drew look
+  finished: its page never ran the timeline, so nothing was hidden and the end card sat on top of every frame. render.py
+  links frames as they land, and kept 200 of them in a cool dude reel (frames 239-288 and 439-588). It now throws away
+  every frame of a session whose log says sub_timeline_script_failure / "Render blocked by", and draws them again.
 
 ## Speed (measured on a GTX 1650 laptop, 6 cores / 12 threads, 8 GB)
 - One VP9 alpha encoder (crf 12, good, cpu-used 4) keeps ~6 threads busy: ~9.6 frames/s at 1080x1920, ~0.8 GB at
