@@ -13,6 +13,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
+import spelling  # noqa: E402
 
 skillenv.utf8_stdio()
 proj = skillenv.path_arg(sys.argv[1])
@@ -24,6 +25,8 @@ subprocess.run([skillenv.tool('ffmpeg'), '-loglevel', 'error', '-y', '-i', os.pa
 m = skillenv.whisper('medium.en')
 s, _ = m.transcribe(wav, word_timestamps=True, vad_filter=False, initial_prompt=prompt)
 ws = [{'text': w.word.strip(), 'start': round(w.start, 3), 'end': round(w.end, 3)} for x in s for w in x.words]
+for w, t in zip(ws, spelling.british_words([w['text'] for w in ws])):   # British spelling on screen
+    w['text'] = t
 with open(os.path.join(proj, 'words.json'), 'w', encoding='utf-8') as fh:
     json.dump(ws, fh, indent=1)
 print(' '.join(f"{w['text']}@{w['start']:.2f}" for w in ws))
