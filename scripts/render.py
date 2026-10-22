@@ -111,6 +111,16 @@ def frame_index(path, start):
     return start + int(os.path.basename(path)[6:12])
 
 
+def broken_session(log_text):
+    """why HyperFrames rejected the frames a session drew, or None. "sub_timeline_script_failure": a browser could not
+    load GSAP from the CDN (a network hiccup), so its page never ran the timeline: nothing hidden, the end card on top of
+    every frame. Those frames are wrong although they look finished (200 of them reached a reel once)."""
+    for sign in ('sub_timeline_script_failure', 'Render blocked by'):
+        if sign in log_text:
+            return 'a browser could not load GSAP (network)' if sign == 'sub_timeline_script_failure' else 'HyperFrames rejected the render'
+    return None
+
+
 def drawing_on(log_text):
     """what the session's browser drew with, from HyperFrames' GPU probe line ("hardware: AMD Radeon ..." / "software")"""
     m = re.search(r'browserGpuMode probe \S+ (\w+)(?: \(.*?renderer="(?:ANGLE \()?([^,"]+(?:, [^,"(]+)?))?', log_text)
@@ -177,7 +187,7 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
     os.makedirs(safe, exist_ok=True)
     have = lambda n: os.path.exists(os.path.join(safe, f'{n:05d}.png'))
     stats = [] if stats is None else stats
-    start, stalls = 0, 0
+    start, stalls, rejected = 0, 0, {}
     while True:
         while start < total and have(start):
             start += 1
@@ -203,7 +213,7 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
         before_dirs, before_chrome = work_dirs(cdir), chrome_pids()
         print(f'session from frame {start} ({start / 30:.2f}s): {end - start} frames, {browsers} browser{"s" * (browsers > 1)}'
               f' ({avail_mb or "?"} MB free of {total_mb or "?"})', flush=True)
-        got, t0 = 0, time.time()
+        got, t0, linked = 0, time.time(), set()
         with open(log, 'w', encoding='utf-8') as fh:
             kw = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
             proc = subprocess.Popen(argv, cwd=proj, env=env, stdout=fh, stderr=subprocess.STDOUT, **kw)
@@ -214,7 +224,7 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
                     for p in live_frames(wd):
                         n = frame_index(p, start)
                         if n < end and not have(n) and complete_png(p):
-                            link(p, os.path.join(safe, f'{n:05d}.png')); got += 1; last_new = time.time()
+                            link(p, os.path.join(safe, f'{n:05d}.png')); got += 1; last_new = time.time(); linked.add(n)
                 if time.time() - last_new > (STALL if got else BOOT + .1 * (end - start)):   # a long session extracts more first
                     print(f'   stalled after {got} frames: next session starts at the first missing frame, '
                           f'{max(1, browsers - stalls - 1)} browser(s), {SESSION}-frame sessions', flush=True)
@@ -235,10 +245,26 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
                         continue
                     os.remove(dst)
                 link(p, dst)
+                linked.add(n)
         dt = time.time() - t0
         with open(log, encoding='utf-8', errors='replace') as fh:
             text = fh.read()
         drew = drawing_on(text)
+        why = broken_session(text)
+        if why:   # its frames are wrong: away with them, and the same frames are drawn again
+            for n in linked:
+                try:
+                    os.remove(os.path.join(safe, f'{n:05d}.png'))
+                except OSError:
+                    pass
+            rejected[start] = rejected.get(start, 0) + 1
+            print(f'   session rejected ({why}): its {len(linked)} frames thrown away, drawing them again', flush=True)
+            if os.path.exists(os.path.join(proj, html)):
+                os.remove(os.path.join(proj, html))
+            if rejected[start] >= 3:
+                sys.exit(f'frames from {start} rejected 3 times ({why}): check the network, then run render.py again '
+                         f'(finished frames are kept). See {log}')
+            continue
         stats.append({'frames': got, 'seconds': dt, 'browsers': browsers, 'drawing': drew, 'fast_png': fast_png_on(text)})
         print(f'   +{got} frames ({dt:.0f}s, {got / max(dt, .01):.2f} frames/s, drawing on {drew})', flush=True)
         if os.path.exists(os.path.join(proj, html)):

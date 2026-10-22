@@ -142,5 +142,14 @@ class WindowsRender(unittest.TestCase):
                 shutil.rmtree(tmp_work, ignore_errors=True)
 
 
+class RejectedSession(unittest.TestCase):
+    def test_a_session_whose_browser_had_no_gsap_is_thrown_away(self):
+        log = ('[FrameCapture:sub_timeline_script_failure] A sub-composition timeline script failed to load '
+               '(https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js)\nFailed: Render blocked by 1 correctness warning')
+        self.assertIn('GSAP', render.broken_session(log))
+        self.assertIsNotNone(render.broken_session('Failed: Render blocked by 1 correctness warning'))
+        self.assertIsNone(render.broken_session('[INFO] Inlined CDN script: gsap.min.js\n 229.5 MB · 150 frames · rendered in 58.9s'))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
