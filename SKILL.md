@@ -102,11 +102,17 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
    as "cloud"/"claws", "skill" as "scale"). No em dashes in on-screen text. A caption never shows a word its shot
    does not contain: when a line's first or last words are not heard, the cut clipped them. Fix the cut; never give
    such words hand-made times in words.json.
-4. Sound effects subtle (template `SFX_GAIN = 0.75` of the base volumes), never louder than the voice.
-5. Credit other creators on screen (@handle) whenever their reels appear. Real numbers on the user's own profile;
+4. British English in every word on screen (captions, punch words, supers you write, inserts): recognise, colour,
+   centre, travelled, organisation; -ise, never -ize. Whisper spells the American way whatever the accent; the scripts
+   convert what they write (transcript, words.json, the punch display text) and match words spelling-blind, so never
+   change a line to the American spelling to get past check_edl.py or align.py. Names and brands keep their own
+   spelling ("Center Parcs", "Pfizer"): when the conversion changes one, FIX in build.py puts it back. Vocabulary is
+   not spelling: "math", "mom" and "apartment" stay as said. The storyboard's own text is never changed.
+5. Sound effects subtle (template `SFX_GAIN = 0.75` of the base volumes), never louder than the voice.
+6. Credit other creators on screen (@handle) whenever their reels appear. Real numbers on the user's own profile;
    anything else (commenters, chat history) is a generic placeholder, never a real person, never fabricated proof.
-6. Prove cuts from the final render, not from snapshots.
-7. Never delete the user's files. Originals are read, never modified.
+7. Prove cuts from the final render, not from snapshots.
+8. Never delete the user's files. Originals are read, never modified.
 
 ## Workflow
 
@@ -142,7 +148,8 @@ captions still follow what was said.
   the cut then reads as a push towards the eyes and leaves wall space above the head for type.
 - Ending: keep ~1s after the last word when the speaker holds a look (a reflective beat reads as an ending; it also
   gives the last punch word time to land). A sign-off spoken too quietly to be heard is cut (tell the user).
-- `line`: exactly what is said in that segment, with punctuation (align.py uses it as the caption text).
+- `line`: exactly what is said in that segment, with punctuation, in British spelling (align.py uses it as the caption
+  text; it converts anything left American, and the transcript is already British).
 - Unsure words (keyword, CTA trigger): re-transcribe that snippet with medium.en and a prompt containing the names.
 - Format: `[{"id": "s01", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "..."}]`
 - Check it: `PY SK/scripts/check_edl.py <project>` (assemble.py runs it first and refuses an EDL that fails). Each

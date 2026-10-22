@@ -19,6 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
+import spelling  # noqa: E402
 
 FF, FP = skillenv.tool('ffmpeg'), skillenv.tool('ffprobe')
 VIDEO_EXT = ('.mp4', '.mov', '.m4v')
@@ -81,12 +82,14 @@ def main():
         words = []
         lines.append(f'===== {cid}  {os.path.basename(f)}')
         for s in segs:
-            lines.append(f'[{s.start:6.2f}-{s.end:6.2f}] {s.text.strip()}')
+            lines.append(f'[{s.start:6.2f}-{s.end:6.2f}] {spelling.british_text(s.text.strip())}')   # British: what edl lines copy
             for w in s.words:
                 t = w.word.strip()
                 if words and t[:1] in '-.' and len(t) > 1 and t[1:2].isdigit():   # "GPT" "-6" / "5" ".1"
                     words[-1]['text'] += t; words[-1]['end'] = round(w.end, 3); continue
                 words.append({'text': t, 'start': round(w.start, 3), 'end': round(w.end, 3)})
+        for w, t in zip(words, spelling.british_words([w['text'] for w in words])):
+            w['text'] = t
         with open(os.path.join(proj, f'words_{cid}.json'), 'w', encoding='utf-8') as fh:
             json.dump(words, fh, indent=1)
         lines.append('words: ' + ' '.join(f"{w['text']}@{w['start']:.2f}" for w in words))

@@ -34,6 +34,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
+import spelling  # noqa: E402
 
 SR = 16000
 LEAD_PAD, TRAIL_PAD = 1.5, 1.0   # how far outside a cut to look for the words it may clip
@@ -42,7 +43,9 @@ GAP_MAX = 20.0                   # dropped stretches longer than this are unused
 
 # ------------------------------------------------------------------ pure logic (unit-tested)
 def norm(t):
-    return re.sub(r"[^\w']", '', t.lower().replace('-', ''))
+    """matching key: lowercase, no punctuation, spelling-blind (the line's British "recognising" is Whisper's
+    "recognizing"; matched letter for letter it read as not heard, and the line got the American spelling to pass)"""
+    return spelling.key(t)
 
 
 def match(want, got, look=4):
@@ -224,7 +227,8 @@ class Ears:
         a, b = max(0.0, a), min(len(x) / SR, b)
         r, _ = self.model(name or self.name).transcribe(x[int(a * SR):int(b * SR)], word_timestamps=True, vad_filter=False,
                                                         beam_size=5, condition_on_previous_text=False)
-        return clean([(w.word.strip(), round(a + w.start, 3), round(a + w.end, 3)) for s in r for w in s.words if w.word.strip()])
+        heard = [(w.word.strip(), round(a + w.start, 3), round(a + w.end, 3)) for s in r for w in s.words if w.word.strip()]
+        return clean([(t, st, en) for t, (_, st, en) in zip(spelling.british_words([h[0] for h in heard]), heard)])   # British, as shown
 
 
 def check_side(ears, x, isl, seg, words, inside, side):

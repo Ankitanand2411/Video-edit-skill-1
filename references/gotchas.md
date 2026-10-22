@@ -24,6 +24,12 @@
   of the audio just outside the cut says otherwise. check_edl.py does exactly that before assembling (assemble.py
   refuses a failing EDL) and align.py exits 1 on it. Never hand-time words Whisper did not hear in their shot.
 
+- Whisper (small.en, medium.en) spells the American way whatever the accent: "recognizing", "color", "center". A line
+  written in British spelling then failed check_edl.py / align.py ("recognising" matched letter for letter against
+  "recognizing" read as NOT HEARD), and the quick way past it, copying Whisper's spelling into the line, put
+  American spelling on screen. scripts/spelling.py: the transcript, the edit check's report and words.json are
+  British, matching is spelling-blind, and the template puts punch display text in British spelling.
+
 ## Rendering
 - HyperFrames' MP4 output captures frames as JPEG (q95 at --quality high, q80 on some paths) before encoding: a
   second lossy step that softens photos and type. scripts/render.py captures PNG (--format png-sequence) and encodes

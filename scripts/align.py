@@ -8,6 +8,8 @@ Here every segment's audio is transcribed on its own, so each word is anchored t
 TEXT comes from edl.json "line" (write what was actually said there, with punctuation: it drives the caption breaks),
 Whisper only supplies the times. Words Whisper did not hear get times interpolated between their neighbours (flagged).
 Each word carries "seg" (its segment id). Reads assets/voice.wav (or voice.m4a, else aroll.mp4).
+Captions are British English (scripts/spelling.py): "recognizing" in the line or from Whisper becomes "recognising",
+and matching is spelling-blind, so a British line is never "not heard" for Whisper's American spelling.
 Exit 1 when a shot's FIRST or LAST line words are not heard with nothing else heard in their place: that is a cut
 clipping them (the first reel lost "So I was" this way while "5/7 heard" was read as Whisper missing fast words), not
 a Whisper quirk. Never give such words hand-made times in words.json: fix the in/out point (check_edl.py prints it),
@@ -15,17 +17,14 @@ or list them in the segment's "heard_ok" after listening. Words missing in the m
 """
 import json
 import os
-import re
 import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
-from check_edl import edges, side_status  # noqa: E402
+import spelling  # noqa: E402
+from check_edl import edges, norm, side_status  # noqa: E402
 
-
-def norm(t):
-    return re.sub(r"[^\w']", '', t.lower().replace('-', ''))
 
 
 def main():
@@ -48,7 +47,8 @@ def main():
         line = edl[s['id']].get('line', '')
         r, _ = m.transcribe(wav, word_timestamps=True, vad_filter=False, initial_prompt=line or None)
         heard = [w for x in r for w in x.words]
-        want = line.split() or [w.word.strip() for w in heard]
+        # the caption text, in British spelling whatever was typed or heard (names mid-sentence keep theirs)
+        want = spelling.british_text(line).split() or spelling.british_words([w.word.strip() for w in heard])
         got = [norm(w.word) for w in heard]
         times, j = [], 0
         for wd in want:   # greedy match in order; Whisper splits / merges some tokens ("old" "-fashioned")

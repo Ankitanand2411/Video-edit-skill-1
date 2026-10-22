@@ -200,6 +200,39 @@ def norm(t):
     return re.sub(r"[^\w'-]", '', t).lower()
 
 
+def skill_module(name):
+    """a module from the skill's own scripts, found through $VIDEO_EDIT_SKILL or ~/.claude/skills/video-edit; None
+    when the skill is not there (the build then works as before)"""
+    import importlib.util
+    for d in (os.environ.get('VIDEO_EDIT_SKILL', ''), os.path.join(os.path.expanduser('~'), '.claude', 'skills', 'video-edit')):
+        f = os.path.join(d, 'scripts', f'{name}.py')
+        if d and os.path.isfile(f):
+            spec = importlib.util.spec_from_file_location(f'skill_{name}', f)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            return mod
+    return None
+
+
+SPELL = skill_module('spelling')   # British English on screen: "recognising", never Whisper's "recognizing"
+
+
+def same_word(a, b):
+    """caption word == punch key word, whatever the spelling (British captions, a key typed the American way)"""
+    return SPELL.key(a) == SPELL.key(b) if SPELL else norm(a) == norm(b)
+
+
+def british(text):
+    """a punch word / super typed for the screen, in British spelling (scripts/spelling.py)"""
+    return SPELL.british_text(text) if SPELL else text
+
+
+# the CONTENT settings that name a punch word by its display text follow it into British spelling
+SCRIPT_PUNCH = {british(t) for t in SCRIPT_PUNCH}
+SPARKLE = {british(t): d for t, d in SPARKLE.items()} if SPARKLE else SPARKLE
+IMPACT = british(IMPACT) if IMPACT else IMPACT
+
+
 FILLER = set("started holding everything something anything apparently properly across today found thought wanted going "
              "remember looked looking little really things right being doing making saying getting".split())
 
@@ -243,12 +276,13 @@ def resolve_punch():
     found = []
     for hint, key, text, it in (PUNCH or auto_punch()):
         toks = key.lower().split()
-        cands = [i for i, w in enumerate(WORDS) if norm(w['text']) == toks[0] and abs(w['start'] - hint) < 1.5
-                 and all(i + k < len(WORDS) and norm(WORDS[i + k]['text']) == tk for k, tk in enumerate(toks))]
+        cands = [i for i, w in enumerate(WORDS) if same_word(w['text'], toks[0]) and abs(w['start'] - hint) < 1.5
+                 and all(i + k < len(WORDS) and same_word(WORDS[i + k]['text'], tk) for k, tk in enumerate(toks))]
         if not cands:
             sys.exit(f'PUNCH word not found: {key!r} near {hint}s')
         i = min(cands, key=lambda c: abs(WORDS[c]['start'] - hint))
         it = PU['italic'] if PU['italic'] is not None else it
+        text = british(text)
         found.append((list(range(i, i + len(toks))), WORDS[i]['start'], text if PU['case'] != 'upper' else text.upper(), it))
     return sorted(found, key=lambda p: p[1])
 
