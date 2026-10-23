@@ -2,7 +2,7 @@
 """Final render, lossless until the last step: <project>/renders/<name>.mp4 (+ the frame-exact audio mix).
 
 Usage (after `PY build.py`):  PY render.py <project_dir> <name> [--crf 12] [--keep-frames] [--browsers N] [--no-fast-png]
-                                                                [--no-overlap]
+                                                                [--no-overlap] [--minutes N]
 
 Why not `HF render` straight to MP4:
   - its MP4 path captures every frame as JPEG (q95 at --quality high) before encoding: a second lossy step that
@@ -31,6 +31,8 @@ Why not `HF render` straight to MP4:
     not next to the output, so the frames were never seen arriving and every session was killed as stalled; both
     places are watched now. And it budgets 640 MB of Node heap per browser (+1 GB) but skips its own warning when
     --workers is given: several browsers ran Node out of heap. NODE_OPTIONS --max-old-space-size is raised to match.
+  --minutes N: stop between sessions once N minutes have passed (exit 3, finished frames kept) and continue on the
+    next run. For a run that has to fit a time limit (a tool call, a session that gets restarted).
   --browsers N forces the count (benchmarks). The summary line prints frames/s, browsers and what the browser drew on.
 
 Needs build.py to support `--range A B` (writes chunk_<first frame>.html covering [A, B), no audio elements) and to
@@ -54,6 +56,10 @@ import skillenv  # noqa: E402
 
 STALL, BOOT, SESSION = 40, 180, 150    # s without a new frame / s to the first frame / max frames per session (8 GB and less)
 PER_BROWSER_MB, RESERVE_MB, MAX_BROWSERS = 700, 1000, 10   # see plan_browsers
+SMALL_PER_MB, SMALL_RESERVE_MB = 1100, 2000  # 8 GB and less: Chrome + HyperFrames' Node heap per browser, and room for
+                                             # the Claude app: the kernel's OOM killer took the app (and the render
+                                             # with it) at 3 browsers with 700 / 1000 and again with 850 / 1600;
+                                             # 2 browsers never did on the 7 GB laptop
 LOW_MEM_MB = 8192                      # HyperFrames' own low-memory threshold (total RAM)
 HEAP_RESERVED_MB, HEAP_PER_BROWSER_MB = 1024, 768   # Node heap: HyperFrames plans 1024 + 640 a browser; fast PNGs are ~20% bigger
 MUSIC_GAIN = 0.20                      # music bed under the voice (before ducking): ~-14 dB, then ducked ~8 dB more
@@ -182,7 +188,7 @@ def link(src, dst):
         shutil.copyfile(src, dst)
 
 
-def frames_of(proj, name, total, force=None, stats=None, fast=True):
+def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=None):
     cdir, safe = os.path.join(proj, 'renders', f'{name}_work'), os.path.join(proj, 'renders', f'{name}_frames')
     os.makedirs(safe, exist_ok=True)
     have = lambda n: os.path.exists(os.path.join(safe, f'{n:05d}.png'))
@@ -193,8 +199,14 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True):
             start += 1
         if start >= total:
             return safe
+        if deadline and time.time() > deadline:
+            done = sum(1 for n in range(total) if have(n))
+            print(f'paused: {done}/{total} frames drawn; run render.py again to continue (they are kept)', flush=True)
+            sys.exit(3)
         total_mb, avail_mb = skillenv.memory_mb()
-        browsers = force or max(1, plan_browsers(avail_mb, os.cpu_count()) - stalls)
+        small = bool(total_mb) and total_mb <= LOW_MEM_MB
+        browsers = force or max(1, plan_browsers(avail_mb, os.cpu_count(), per=SMALL_PER_MB if small else PER_BROWSER_MB,
+                                                 reserve=SMALL_RESERVE_MB if small else RESERVE_MB) - stalls)
         size = SESSION if stalls else session_frames(total_mb, total)
         end = start + 1   # up to `size` frames, stopping at the next frame already captured
         while end < total and end - start < size and not have(end):
@@ -393,7 +405,9 @@ def main():
     live = (LiveEncoder(encode_args(ff, wav, crf, total, out), safe, total)
             if total_mb and total_mb > LOW_MEM_MB and '--no-overlap' not in sys.argv else None)
     try:
-        frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv)
+        minutes = float(sys.argv[sys.argv.index('--minutes') + 1]) if '--minutes' in sys.argv else None
+        frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv,
+                  deadline=t0 + minutes * 60 if minutes else None)
     except BaseException:
         if live:
             live.kill()

@@ -30,6 +30,18 @@
   American spelling on screen. scripts/spelling.py: the transcript, the edit check's report and words.json are
   British, matching is spelling-blind, and the template puts punch display text in British spelling.
 
+- A cut inside a word that the checks passed (the cool dude reel, s07): the out-point 25.09 sat in the quiet "f" of
+  "finger" (25.04-25.46). 100 ms at -52..-59 dB looked like a pause to the envelope, and Whisper, given only the
+  cut-off shot, completed "on my f" to "finger"; the line's "fingers" then matched "finger" as a prefix. The reel said
+  "tiny callus on my f-". check_edl.py now transcribes the raw audio around every cut with speech just beyond it and
+  fails a first / last word that runs past the cut; a prefix alone no longer matches.
+- A final "s" left outside the out-point (s03, "shapes"): the "p" closes at 12.02, the "s" hisses 12.18-12.36 at
+  -2..-7 dB, 15 dB under the vowel, so the RMS envelope missed it and the cut at 12.08 dropped it. check_edl.py
+  looks for that hiss (4-8 kHz over 100-2000 Hz) beyond the cut when the word ends in an s sound.
+- Plural slips in lines ("word" for a spoken "words", "pencil" for "pencils"): the full-clip transcript said one,
+  the shot says the other. The shot is what the reel plays: check_edl.py fails a line word that is the plural or
+  singular of what small.en AND medium.en hear in the shot.
+
 ## Rendering
 - HyperFrames' MP4 output captures frames as JPEG (q95 at --quality high, q80 on some paths) before encoding: a
   second lossy step that softens photos and type. scripts/render.py captures PNG (--format png-sequence) and encodes
@@ -44,6 +56,11 @@
 - `--format png-sequence` numbers frames from 0 in its work folder (captured-frames/frame_000000.png) and from 1 in
   the finished output folder (frame_000001.png). Mixing the two without the -1 put frame N-1's image in slot N at
   six session ends (visible 1-frame stutters). render.py treats a finished session's output folder as the authority.
+- 8 GB laptop: 3 render browsers plus the Claude app and the user's own apps ran the machine out of memory, and the
+  kernel's OOM killer took the Claude app (oom_score_adj 300: its first pick), ending the session and the render with
+  it, four times in one render (journalctl -k: "Out of memory: Killed process ... (claude-desktop)"). Not even a
+  systemd --user job survived. render.py budgets 1.1 GB a browser with 2 GB kept free there, and --minutes N splits
+  a render into parts that resume. A killed render leaves its headless Chrome running: end those by PID.
 - Puppeteer starts Chrome detached: killing the render process leaves chrome-headless-shell running (memory). Kill
   the Chrome PIDs that appeared after the session started. Never `pkill -f <pattern>` from a shell whose own command
   line contains the pattern: it kills that shell (happened twice).
