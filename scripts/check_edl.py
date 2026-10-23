@@ -18,7 +18,16 @@ Per shot (times are the source clip's):
      they are there, list them in the segment's "heard_ok". A different word heard in their place ("were" heard as
      "or") is a mishearing: fine, captions take their text from the line.
   3. the same at the END with the 1.0s after the out-point.
-  4. notes: a cut point inside continuous sound (a word may be clipped: the nearest silence is printed) and words
+  4. a line's first / last word cut short: where there is speech just beyond the cut, that word is transcribed in the
+     raw audio around it; still running 0.12s+ past the out-point (starting before the in-point): FAIL, with the point
+     to cut instead. The handwriting reel ended a shot at 25.09 inside "finger" (25.04-25.46): its quiet "f" looked like
+     a pause, and Whisper, given the cut-off shot alone, completed "on my f" to "finger", so steps 1-3 passed it.
+  5. the line says the plural / singular of what the shot says ("fingers" for a spoken "finger"): FAIL, the caption
+     shows the line. Whisper's split words ("old" "-fashioned") still match; a prefix alone no longer does.
+  6. a final "s" cut off: the line's last word ends in an s sound and a hiss starts just after the out-point, with
+     only quiet between (the "p" of "shapes" closed, the cut fell there, its "s" came 0.1s later). The same for an
+     opening "s" before an in-point. FAIL with the point to use.
+  7. notes: a cut point inside continuous sound (a word may be clipped: the nearest silence is printed) and words
      heard inside the shot before the line's first / after its last word (a false start let in, or Whisper inventing
      a word at a cut).
 Then a DROPPED report: what is said in every stretch the EDL leaves out between shots of a clip (up to 20s each).
@@ -48,12 +57,31 @@ def norm(t):
     return spelling.key(t)
 
 
+def splits_into(w, got, k, upto=3):
+    """the line word w was heard as got[k], got[k+1], ... joined: Whisper splits "old-fashioned" into "old" "-fashioned".
+    A prefix on its own is not enough: "finger" heard for the line's "fingers" let a wrong caption through"""
+    s = ''
+    for i in range(k, min(k + upto, len(got))):
+        s += got[i] or ''
+        if s == w:
+            return True
+        if not w.startswith(s):
+            return False
+    return False
+
+
+def plural_pair(a, b):
+    """two normalised words that differ only by a plural ending (finger / fingers, box / boxes)"""
+    short, long_ = sorted((a, b), key=len)
+    return a != b and bool(short) and long_ in (short + 's', short + 'es')
+
+
 def match(want, got, look=4):
     """in-order greedy match of line words to heard words (both normalised) -> heard index or None per line word.
-    A heard word may be a prefix of the line word: Whisper splits "old-fashioned" into "old" "-fashioned"."""
+    A word Whisper split in two counts when its parts join up again (splits_into)."""
     out, j = [], 0
     for w in want:
-        k = next((k for k in range(j, min(j + look, len(got))) if got[k] and (got[k] == w or w.startswith(got[k]))), None)
+        k = next((k for k in range(j, min(j + look, len(got))) if got[k] and (got[k] == w or splits_into(w, got, k))), None)
         out.append(k)
         if k is not None:
             j = k + 1
@@ -86,6 +114,120 @@ def edges(line_words, heard_words):
         return list(line_words), list(heard_words), [], []
     f, last = hit[0], hit[-1]
     return line_words[:f], heard_words[:m[f]], line_words[last + 1:], heard_words[m[last] + 1:]
+
+
+def near_misses(line_words, heard_words, heard_ok=()):
+    """[(line word, heard word)] where the shot says the singular / plural of what the line says. The caption shows the
+    line, so a line typo ("fingers" for a spoken "finger") would put a word on screen that was never said"""
+    heard = clean(heard_words)
+    lw = [norm(w) for w in line_words]
+    hw = [norm(h if isinstance(h, str) else h[0]) for h in heard]
+    ok = {norm(w) for w in heard_ok}
+    m = match(lw, hw)
+    out = []
+    for i, k in enumerate(m):
+        if k is not None or lw[i] in ok:
+            continue
+        lo = next((m[j] for j in range(i - 1, -1, -1) if m[j] is not None), -1) + 1
+        hi = next((m[j] for j in range(i + 1, len(m)) if m[j] is not None), len(hw))
+        t = next((t for t in range(lo, hi) if plural_pair(lw[i], hw[t])), None)
+        if t is not None:
+            out.append((line_words[i], heard[t] if isinstance(heard[t], str) else heard[t][0]))
+    return out
+
+
+def cut_short(edge_word, heard, cut, side, voiced, over=.12):
+    """the line's first ('lead') or last ('trail') word, transcribed in the raw audio around the cut (heard =
+    [(text, start, end)]): -> (text, start, end) when the cut leaves part of it out, i.e. it runs on more than `over`
+    seconds past an out-point (starts before an in-point) and there is speech there (voiced). The cut at 25.09 kept
+    only the quiet "f" of "finger" (25.04-25.46): 100 ms of near-silence looked like a pause, and Whisper, hearing the
+    cut-off shot on its own, completed "on my f" to "finger"."""
+    if not voiced:
+        return None
+    w = norm(edge_word)
+    cands = [h for h in clean(heard) if norm(h[0]) == w or plural_pair(norm(h[0]), w)]
+    if not cands:
+        return None
+    h = min(cands, key=lambda h: abs((h[2] if side == 'trail' else h[1]) - cut))
+    if side == 'trail' and h[1] < cut < h[2] - over:
+        return h
+    if side == 'lead' and h[1] + over < cut < h[2]:
+        return h
+    return None
+
+
+def speech_beyond(db, thr, cut, side, span=.12, hop=.02, rise=6.0):
+    """speech just outside the cut, after an out-point / before an in-point: a frame there `rise` dB above the speech
+    threshold and above the level at the cut. A word dying away past the cut ("type" fading from -46 dB) is not
+    speech beyond it; a word that starts there ("finger" at -33 dB right after a quiet "f") is."""
+    at = db[min(len(db) - 1, max(0, int(round(cut / hop))))]
+    a, b = (cut, cut + span) if side == 'trail' else (cut - span, cut)
+    seg = db[max(0, int(round(a / hop))):int(round(b / hop))]
+    return bool(seg) and max(seg) >= max(thr, at) + rise
+
+
+def speech_edge(db, thr, cut, side, hop=.02, dip=.16):
+    """where the speech beyond the cut ends (trail: walking forward) or starts (lead: walking back): across a dip of up
+    to `dip` seconds at the cut, then to the first two quiet frames in a row. -> seconds"""
+    step = 1 if side == 'trail' else -1
+    i = int(round(cut / hop))
+    k = 0
+    while 0 <= i < len(db) and db[i] <= thr and k * hop < dip:   # the dip the cut sits in
+        i, k = i + step, k + 1
+    last = i
+    while 0 <= i + step < len(db):
+        if db[i] > thr:
+            last = i
+        elif db[i + step] <= thr:
+            break
+        i += step
+    return round(last * hop + (hop if side == 'trail' else 0), 3)
+
+
+def hiss_track(x, hop=.02, win=.03, sr=SR):
+    """per hop: (4-8 kHz minus 100-2000 Hz energy in dB, level in dB). An "s" is a hiss: loud up high, quiet below.
+    The RMS envelope misses one: a final "s" sits ~15 dB under the vowel before it."""
+    import numpy as np
+    n, h = int(win * sr), int(hop * sr)
+    w = np.hanning(n)
+    fr = np.fft.rfftfreq(n, 1 / sr)
+    hi, lo = (fr > 4000) & (fr < 8000), (fr > 100) & (fr < 2000)
+    out = []
+    for i in range(0, max(0, len(x) - n), h):
+        f = np.abs(np.fft.rfft(x[i:i + n] * w)) ** 2
+        out.append((float(10 * np.log10((f[hi].sum() + 1e-12) / (f[lo].sum() + 1e-12))), float(10 * np.log10(f.sum() + 1e-12))))
+    return out
+
+
+S_SOUND = ('s', 'z', 'x', 'ce', 'se')
+
+
+def hiss_beyond(track, cut, side, span=.3, hop=.02, ratio=8.0, run=3, floor=None, loud=None):
+    """(start, end) of a hiss of `run`+ hops starting within `span` beyond the cut (after an out-point / before an
+    in-point) with no vowel between, else None. floor: the lowest level a hiss may have (an "s" is quiet overall);
+    loud: the level from which a low-pitched frame is a vowel (the next word starting, not this one's "s")."""
+    step = 1 if side == 'trail' else -1
+    i0 = int(round(cut / hop))
+    first = None
+    for k in range(int(span / hop)):
+        i = i0 + step * k
+        if not 0 <= i < len(track):
+            break
+        r, lvl = track[i]
+        sound = floor is None or lvl >= floor
+        if r >= ratio and sound:
+            first = i if first is None else first
+            if abs(i - first) + 1 >= run:
+                j = i
+                while 0 <= j + step < len(track) and track[j + step][0] >= ratio:
+                    j += step
+                a, b = sorted((first, j))
+                return round(a * hop, 2), round((b + 1) * hop, 2)
+        elif first is not None:
+            first = None
+        elif r < -20 and (loud is None or lvl >= loud):   # a vowel before any hiss: the next word, not this one's "s"
+            return None
+    return None
 
 
 def side_status(missing, extra, heard_ok=()):
@@ -281,11 +423,15 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
             if json.load(fh).get('passed') == key:
                 say('EDL check: passed before, EDL unchanged')
                 return True
-    ears, audio, isl, fails = Ears(model), {}, {}, 0
+    ears, audio, isl, env, hiss, fails = Ears(model), {}, {}, {}, {}, 0
     for clip in dict.fromkeys(s['clip'] for s in edl):
         audio[clip] = load_audio(src[clip])
         db = envelope(audio[clip])
-        isl[clip] = islands(db, thr=speech_thr(db))
+        env[clip] = (db, speech_thr(db))
+        isl[clip] = islands(db, thr=env[clip][1])
+        track = hiss_track(audio[clip])
+        lv = sorted(t[1] for t in track)
+        hiss[clip] = (track, lv[len(lv) // 5] + 4, lv[len(lv) // 2])   # hiss floor: the quiet fifth + 4 dB; loud: the median
     say(f'EDL check ({len(edl)} shots, {model}):')
     for seg in edl:
         x, words = audio[seg['clip']], seg.get('line', '').split()
@@ -294,10 +440,50 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
             continue
         inside = ears.hear(x, seg['in'], seg['out'])
         msgs, notes = [], []
+        failed = set()
         for side in ('lead', 'trail'):
             fail, note = check_side(ears, x, isl[seg['clip']], seg, words, inside, side)
             msgs += [fail] if fail else []
             notes += [note] if note else []
+            if fail:
+                failed.add(side)
+        db, thr = env[seg['clip']]
+        for side, cut, word in (('lead', seg['in'], words[0]), ('trail', seg['out'], words[-1])):
+            if side in failed or not speech_beyond(db, thr, cut, side):
+                continue   # already failed there, or no speech just beyond the cut: nothing can be cut short
+            around = ears.hear(x, cut - 1.2, cut + 1.0) if side == 'trail' else ears.hear(x, cut - 1.0, cut + 1.2)
+            h = cut_short(word, around, cut, side, True)
+            if h and side == 'trail':   # Whisper pads word ends into silence: the earlier of its end and the speech's
+                end = min(h[2], speech_edge(db, thr, cut, 'trail'))
+                msgs.append(f"the out-point {cut:.2f} cuts {h[0]!r} short (heard {h[1]:.2f}-{h[2]:.2f}; the reel would keep only its "
+                            f"start): end at {end + .02:.2f} to keep it whole, or take it out of the line and end before {h[1] - .02:.2f}")
+            elif h:
+                start = max(h[1], speech_edge(db, thr, cut, 'lead'))
+                msgs.append(f"the in-point {cut:.2f} cuts {h[0]!r} short or off (heard {h[1]:.2f}-{h[2]:.2f}, speech from {start:.2f}): "
+                            f"start at {max(0, start - .05):.2f} to keep it, or take it out of the line")
+        for side, cut, word in (('trail', seg['out'], words[-1]), ('lead', seg['in'], words[0])):
+            w = norm(word)
+            if side in failed or not (w.endswith(S_SOUND) if side == 'trail' else w[:1] in 'szc'):
+                continue
+            hs = hiss_beyond(hiss[seg['clip']][0], cut, side, floor=hiss[seg['clip']][1], loud=hiss[seg['clip']][2])
+            if hs and side == 'trail':
+                failed.add(side)
+                msgs.append(f"the out-point {cut:.2f} cuts the final 's' sound of {word!r} (a hiss at {hs[0]:.2f}-{hs[1]:.2f}): "
+                            f"end at {hs[1] + .02:.2f}")
+            elif hs:
+                failed.add(side)
+                msgs.append(f"the in-point {cut:.2f} cuts the opening 's' sound of {word!r} (a hiss at {hs[0]:.2f}-{hs[1]:.2f}): "
+                            f"start at {max(0, hs[0] - .03):.2f}")
+        misses = near_misses(words, [h[0] for h in inside], seg.get('heard_ok', ()))
+        if misses:   # the last letter is where Whisper is least sure: medium.en must hear it the same way
+            again = {norm(a) for a, _ in near_misses(words, [h[0] for h in ears.hear(x, seg['in'], seg['out'], 'medium.en')],
+                                                      seg.get('heard_ok', ()))}
+            for said_line, said_heard in misses:
+                if norm(said_line) in again:
+                    msgs.append(f"the line says {said_line!r}, the shot says {said_heard!r} (small.en and medium.en agree): captions show "
+                                f"the line, so write what was said (or add \"heard_ok\": [{json.dumps(said_line)}] after listening)")
+                else:
+                    notes.append(f"small.en heard {said_heard!r} for the line's {said_line!r}, medium.en agrees with the line")
         lm, le, tm, te = edges(words, [h[0] for h in inside])
         if le and not lm:
             notes.append(f"heard before the line's first word: {' '.join(le)!r} (false start let in, or Whisper inventing a word)")

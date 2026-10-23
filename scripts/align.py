@@ -23,7 +23,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
 import spelling  # noqa: E402
-from check_edl import edges, norm, side_status  # noqa: E402
+from check_edl import edges, norm, side_status, splits_into  # noqa: E402
 
 
 
@@ -52,7 +52,7 @@ def main():
         got = [norm(w.word) for w in heard]
         times, j = [], 0
         for wd in want:   # greedy match in order; Whisper splits / merges some tokens ("old" "-fashioned")
-            k = next((k for k in range(j, min(j + 4, len(heard))) if got[k] and (got[k] == norm(wd) or norm(wd).startswith(got[k]))), None)
+            k = next((k for k in range(j, min(j + 4, len(heard))) if got[k] and (got[k] == norm(wd) or splits_into(norm(wd), got, k))), None)
             if k is None:
                 times.append(None)
                 continue

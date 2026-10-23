@@ -154,7 +154,12 @@ captions still follow what was said.
 - Format: `[{"id": "s01", "clip": "c1", "in": 12.66, "out": 15.72, "zoom": 1.0, "cx": 0.5, "cy": 0.5, "line": "..."}]`
 - Check it: `PY SK/scripts/check_edl.py <project>` (assemble.py runs it first and refuses an EDL that fails). Each
   shot is transcribed on its own: a line's first or last words that are said just outside the cut fail it, with the
-  in/out point to use instead. Its DROPPED report prints what is said in every stretch the cut leaves out.
+  in/out point to use instead. It also fails a cut that keeps only part of a word (the reel once ended a shot in the
+  quiet "f" of "finger": 100 ms of near-silence that looked like a pause), a final "s" left outside the out-point (the
+  "p" of "shapes" closed, the cut fell there, the "s" came 0.1 s later) and a line that says the plural of what was said
+  ("fingers" for "finger": the caption shows the line). Never place a cut by the transcript's word times alone: a
+  quiet consonant (f, s, th, p) reads as a gap. Its DROPPED report prints what is said in every stretch the cut leaves
+  out.
 - Post the EDL to the user as a short table (line, shot, look per section) plus what was cut, in the DROPPED report's
   own words ("cut: 'So I was'", never your summary of it), and keep going; do not wait.
 
@@ -211,6 +216,9 @@ PY SK/scripts/cutout.py <project>                  # only if build.py says piece
 PY SK/scripts/render.py <project> <slug>-vN        # lossless: PNG frames, browsers in parallel, one x264 encode
 PY SK/scripts/check_cuts.py <project> renders/<slug>-vN.mp4 --phone
 ```
+On a machine with 8 GB or less, `--minutes 7` makes render.py stop between sessions and continue on the next run
+(finished frames kept): each part fits one tool call, and a part that dies costs nothing. It budgets 1.1 GB a browser
+there and keeps 2 GB free: with less, the kernel's out-of-memory killer took the Claude app and the render with it.
 render.py, not `HF render`: HyperFrames' MP4 path captures JPEG frames (a second lossy step) and its capture can
 stall for good on machines under 8 GB of RAM. render.py hard-links every captured frame, restarts a stalled session
 at the first missing frame, mixes voice + SFX (+ assets/music.* ducked under the voice) and encodes once (crf 12,

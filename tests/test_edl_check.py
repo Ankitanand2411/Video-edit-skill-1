@@ -160,5 +160,51 @@ class WhisperDevice(unittest.TestCase):
         self.assertEqual(skillenv.pick_device(1, True), 'cuda')
 
 
+class CutWords(unittest.TestCase):
+    """the cool dude reel: s07 ended at 25.09 inside 'finger' (25.04-25.46), s03 at 12.08 before the 's' of 'shapes',
+    and the lines said 'fingers', 'word', 'pencil' where she said 'finger', 'words', 'pencils'"""
+
+    def test_a_prefix_alone_is_no_match_but_a_split_word_is(self):
+        self.assertEqual(check_edl.match(['fingers'], ['finger']), [None])
+        self.assertEqual(check_edl.match(['oldfashioned'], ['old', 'fashioned']), [0])   # "old" "-fashioned" after norm
+        self.assertTrue(check_edl.splits_into('oldfashioned', ['old', 'fashioned'], 0))
+        self.assertFalse(check_edl.splits_into('fingers', ['finger', 'so'], 0))
+
+    def test_plural_pairs(self):
+        self.assertTrue(check_edl.plural_pair('finger', 'fingers'))
+        self.assertTrue(check_edl.plural_pair('boxes', 'box'))
+        self.assertFalse(check_edl.plural_pair('word', 'word'))
+        self.assertFalse(check_edl.plural_pair('callus', 'callous'))
+
+    def test_near_misses(self):
+        line = 'tiny callus on my fingers,'.split()
+        self.assertEqual(check_edl.near_misses(line, 'tiny callous on my finger,'.split()), [('fingers,', 'finger,')])
+        self.assertEqual(check_edl.near_misses(line, 'tiny callus on my fingers'.split()), [])
+        self.assertEqual(check_edl.near_misses(line, 'tiny callous on my finger,'.split(), heard_ok=['fingers']), [])
+
+    def test_a_word_cut_short_at_the_out_point(self):
+        around = [('my', 24.88, 25.04), ('finger,', 25.04, 25.46), ('so', 25.46, 25.72)]
+        self.assertEqual(check_edl.cut_short('fingers,', around, 25.09, 'trail', True), ('finger,', 25.04, 25.46))
+        self.assertIsNone(check_edl.cut_short('finger,', around, 25.43, 'trail', True))    # ends with the word: fine
+        self.assertIsNone(check_edl.cut_short('finger,', around, 25.09, 'trail', False))   # silence beyond the cut
+        self.assertIsNotNone(check_edl.cut_short('and', [('and', 3.53, 4.33)], 3.97, 'lead', True))
+
+    def test_speech_beyond_rises_a_fade_does_not(self):
+        hop = .02
+        finger = [-35] * 50 + [-52, -52, -56, -58, -59] + [-36, -33, -34, -34, -33] + [-35] * 10   # cut in the "f"
+        cut = 50 * hop + 4 * hop
+        self.assertTrue(check_edl.speech_beyond(finger, -50.5, cut, 'trail'))
+        fade = [-20] * 50 + [-31, -35, -41, -45, -46, -47, -49, -54, -58, -61, -62, -63]           # "type" dying away
+        self.assertFalse(check_edl.speech_beyond(fade, -50.5, 50 * hop + 4 * hop, 'trail'))
+
+    def test_a_final_s_after_the_out_point(self):
+        quiet, vowel, hiss = (-38, -6), (-45, 18), (15, -4)
+        track = [vowel] * 10 + [quiet] * 4 + [hiss] * 8 + [quiet] * 4          # "shape" + p closure + "s"
+        hs = check_edl.hiss_beyond(track, 10 * .02 + .02, 'trail', floor=-9.4, loud=7.0)
+        self.assertEqual(hs, (0.28, 0.44))
+        nxt = [vowel] * 10 + [quiet] * 2 + [vowel] * 3 + [hiss] * 5              # the next word starts first
+        self.assertIsNone(check_edl.hiss_beyond(nxt, 10 * .02 + .02, 'trail', floor=-9.4, loud=7.0))
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

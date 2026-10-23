@@ -23,6 +23,12 @@ class Browsers(unittest.TestCase):
         self.assertEqual(render.plan_browsers(55000, 16), 10)   # 64 GB, 16 cores
         self.assertEqual(render.plan_browsers(55000, 6), 5)     # cores - 1 leaves one for the system
 
+    def test_small_machines_leave_room_for_the_app(self):
+        # 8 GB laptop: 3 browsers ran the system out of memory at ~3.2 and ~4.2 GB free (the OOM killer took the app)
+        self.assertEqual(render.plan_browsers(3230, 12, per=render.SMALL_PER_MB, reserve=render.SMALL_RESERVE_MB), 1)
+        self.assertEqual(render.plan_browsers(4200, 12, per=render.SMALL_PER_MB, reserve=render.SMALL_RESERVE_MB), 2)
+        self.assertEqual(render.plan_browsers(3230, 12), 3)   # the old budget
+
     def test_unknown_or_tiny_means_one_browser_like_before(self):
         self.assertEqual(render.plan_browsers(None, 12), 1)
         self.assertEqual(render.plan_browsers(4000, None), 1)
