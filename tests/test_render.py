@@ -148,6 +148,35 @@ class WindowsRender(unittest.TestCase):
                 shutil.rmtree(tmp_work, ignore_errors=True)
 
 
+@unittest.skipUnless(skillenv.tool('ffmpeg'), 'needs ffmpeg')
+class MusicMix(unittest.TestCase):
+    def test_a_reel_with_a_music_bed_mixes(self):
+        # ffmpeg 6.1 refused the music fade-in written 'd=.6' ("Unable to parse option value \".6\" as duration"):
+        # every render with assets/music.* died in audio_mix before its first frame
+        import math
+        import struct
+        import tempfile
+        import wave
+
+        def tone(path, seconds, hz, rate=48000):
+            with wave.open(path, 'wb') as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(rate)
+                w.writeframes(b''.join(struct.pack('<h', int(8000 * math.sin(2 * math.pi * hz * i / rate)))
+                                       for i in range(int(seconds * rate))))
+
+        with tempfile.TemporaryDirectory() as proj:
+            os.makedirs(os.path.join(proj, 'assets'))
+            tone(os.path.join(proj, 'assets', 'voice.wav'), 3, 220)
+            tone(os.path.join(proj, 'assets', 'music.wav'), 1, 440)   # shorter than the reel: it loops
+            out = os.path.join(proj, 'mix.wav')
+            music = render.audio_mix(proj, {'reel_dur': 3.0, 'sfx': []}, out)
+            self.assertTrue(music.endswith('music.wav'))
+            with wave.open(out) as w:
+                self.assertAlmostEqual(w.getnframes() / w.getframerate(), 3.0, places=1)
+
+
 class RejectedSession(unittest.TestCase):
     def test_a_session_whose_browser_had_no_gsap_is_thrown_away(self):
         log = ('[FrameCapture:sub_timeline_script_failure] A sub-composition timeline script failed to load '
