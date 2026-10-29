@@ -316,7 +316,7 @@ def audio_mix(proj, reel, out):
     if music:   # loop, trim, fade, then duck under the voice
         mi = len(reel['sfx']) + 1
         ins += ['-stream_loop', '-1', '-i', music]
-        flt.append(f"[{mi}:a]atrim=0:{dur},aresample=48000,volume={MUSIC_GAIN},afade=t=in:d=.6,afade=t=out:st={dur - 1.8}:d=1.8[mus]")
+        flt.append(f"[{mi}:a]atrim=0:{dur},aresample=48000,volume={MUSIC_GAIN},afade=t=in:d=0.6,afade=t=out:st={dur - 1.8}:d=1.8[mus]")
         voice += ',asplit=2[v][key]'
         flt.append('[mus][key]sidechaincompress=threshold=0.04:ratio=6:attack=25:release=450[duck]')
         mixed.append('[duck]')
