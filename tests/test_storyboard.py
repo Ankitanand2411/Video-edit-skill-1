@@ -104,14 +104,14 @@ class Graphics(unittest.TestCase):
         self.assertEqual((g['banner']['text'], g['banner']['tone']), ('RESTRICTED', 'red'))
         self.assertTrue(g['locks'])
         self.assertEqual((g['then']['banner']['text'], g['then']['banner']['small'], g['then']['banner']['tone'], g['then']['icon']),
-                         ('UNRESTRICTED', 'GAMING PLATFORMS', 'green', 'gamepad'))
+                         ('UNRESTRICTED', 'Gaming Platforms', 'green', 'gamepad'))   # as the storyboard writes it
 
     def test_split_sides(self):
         a, b = sbgraphics.graphics(U16['SCENE 2'], MAP)[0]['sides']
         self.assertEqual((a['label'], a['items'], a['badge'], a['tone'], a['blink']),
-                         ('BANNED', ['TikTok', 'Instagram', 'Facebook'], 'UNDER 16 BAN', 'red', False))
+                         ('Banned', ['TikTok', 'Instagram', 'Facebook'], 'Under 16 Ban', 'red', False))   # as written
         self.assertEqual((b['label'], b['items'], b['badge'], b['tone'], b['blink']),
-                         ('ALLOWED', ['Roblox', 'Minecraft'], 'NO REGULATION', 'yellow', True))
+                         ('Allowed', ['Roblox', 'Minecraft'], 'NO REGULATION', 'yellow', True))
         self.assertEqual((a['label_tone'], b['label_tone']), ('red', 'green'))   # the chips say what the side means
 
     def test_flow_and_stat(self):
@@ -126,7 +126,7 @@ class Graphics(unittest.TestCase):
         m = sbgraphics.graphics(U16['SCENE 4'], MAP)[0]
         self.assertEqual((m['places'], m['targets']), (['Australia', 'Malaysia'], ['Roblox', 'Minecraft']))
         c = sbgraphics.graphics(U16['Outro'], MAP)[0]['cta']
-        self.assertEqual((c['verb'], c['name'], c['tagline']), ('Follow', 'School Advisor', 'for more education news'))
+        self.assertEqual((c['verb'], c['name'], c['tagline']), ('Follow', 'School Advisor', 'for more education News'))   # as written
 
     def test_footage_is_not_a_graphic(self):   # the handwriting storyboard: its pictures carry these lines
         for line in ("Close-up of a child's fingers gripping a pencil.", 'Child identifying a letter on a worksheet.',
@@ -205,20 +205,33 @@ def template(names, ns):
 
 
 class ScreenCase(unittest.TestCase):
-    T = template({'shown', 'screen_text'}, {'re': re, 'PROPER': {'malaysia', 'tiktok', 'roblox', 'australia'},
-                                            'british': lambda t: t.replace('ization', 'isation')})
+    T = template({'shown', 'bare', 'script_tokens', 'storyboard_forms'},
+                 {'re': re, 'PROPER': {'malaysia', 'tiktok', 'roblox', 'australia'}, 'SPELL': None,
+                  'norm': lambda t: re.sub(r"[^\w'-]", '', t).lower().replace('isation', 'ization')})
 
-    def test_names_keep_capitals(self):
+    def test_names_keep_capitals_without_a_storyboard(self):
         shown = self.T['shown']
         self.assertEqual([shown(w) for w in ('Sounds', 'TikTok,', 'MCMC', "Malaysia's", 'UNICEF', 'So', 'I', 'Australia')],
                          ['sounds', 'TikTok,', 'MCMC', "Malaysia's", 'UNICEF', 'so', 'I', 'Australia'])
 
-    def test_graphic_text_sentence_case_british(self):
-        st = self.T['screen_text']
-        self.assertEqual(st('In-Game Chat (Roblox)'), 'In-game chat (Roblox)')
-        self.assertEqual(st('Radicalization / Exploitation'), 'Radicalisation / exploitation')
-        self.assertEqual(st('Malaysian Kids', ['Malaysian']), 'Malaysian kids')
+    def test_digit_grouping_kept(self):   # the first news reel captioned "100000"
+        bare = self.T['bare']
+        self.assertEqual([bare(w) for w in ('100,000', 'TikTok,', '16.', '1.5', "Malaysia's", 'in-game,')],
+                         ['100,000', 'TikTok', '16', '1.5', "Malaysia's", 'in-game'])
 
+    def test_captions_take_the_scripts_words(self):
+        ns = template({'bare', 'script_tokens', 'storyboard_forms'},
+                      {'re': re, 'SPELL': None, 'norm': lambda t: re.sub(r"[^\w'-]", '', t).lower().replace('isation', 'ization')})
+        ns['SB_DOC'] = {'scenes': [{'script': "Malaysia's former Deputy Police Chief warned that children as young as 12 had been "
+                                              'recruited... from grooming and radicalization. Here at home, MCMC is now looking.'}]}
+        said = "Malaysia's former deputy police chief warned that kids as young as 12 radicalisation. here at home, MCMC".split()
+        ns['WORDS'] = [{'text': w, 'shown': w} for w in said]
+        ns['storyboard_forms']()
+        got = [w['shown'] for w in ns['WORDS']]
+        self.assertEqual(got[:5], ["Malaysia's", 'former', 'Deputy', 'Police', 'Chief'])   # the script's capitals
+        self.assertEqual(got[7], 'kids')                                                   # not in the script: as said
+        self.assertIn('radicalization.', got)                                              # the script's spelling
+        self.assertEqual(got[-4:], ['Here', 'at', 'home,', 'MCMC'])
 
 if __name__ == '__main__':
     unittest.main()
