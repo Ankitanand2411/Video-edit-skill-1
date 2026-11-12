@@ -113,7 +113,14 @@ def british(word):
         return word
     lead, core, poss, trail = m.groups()
     parts = core.split('-')
-    return lead + '-'.join(_cased(p, _lower(p.lower())) if p else p for p in parts) + poss + trail
+    return lead + '-'.join(fix(p) for p in parts) + poss + trail
+
+
+def fix(part):
+    """one hyphen-free part: untouched unless its spelling changes, so a name's own casing survives ("TikTok" became
+    "Tiktok", "YouTube" "Youtube", "iPhone" "iphone" when every word was re-cased)"""
+    out = _lower(part.lower()) if part else part
+    return part if not part or out == part.lower() else _cased(part, out)
 
 
 def british_words(words):

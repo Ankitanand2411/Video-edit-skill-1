@@ -1,6 +1,6 @@
 ---
 name: video-edit
-description: "Turns raw 9:16 talking-head clips into a finished, premium Instagram reel end to end: picks the cleanest take of every line across your clips, cuts dead air, punches in, cuts you out of the background for words behind your head, applies one of three designed looks (bold kinetic words, cool girl, cool dude), lays a storyboard spreadsheet on the edit (its pictures as full-quality cutaways, its supers, an end card), builds animated UI inserts with parallel sub-agents, adds subtle sound design, renders losslessly and checks every cut frame by frame inside the Reels safe zone. Trigger with /video-edit or phrases like 'edit these clips', 'edit the video in this folder', 'here is the storyboard', 'cut this into a reel', 'make this reel look fire'."
+description: "Turns raw 9:16 talking-head clips into a finished, premium Instagram reel end to end: picks the cleanest take of every line across your clips, cuts dead air, punches in, cuts you out of the background for words behind your head, applies one of three designed looks (bold kinetic words, cool girl, cool dude), follows a storyboard spreadsheet line by line (its pictures as full-quality cutaways, the graphics its VISUALS describe - stamped phone, split screen, flowchart, stat card, map - timed to the words, its supers, its closing frame), builds animated UI inserts with parallel sub-agents, adds subtle sound design, renders losslessly and checks every cut frame by frame inside the Reels safe zone. Trigger with /video-edit or phrases like 'edit these clips', 'edit the video in this folder', 'here is the storyboard', 'cut this into a reel', 'make this reel look fire'."
 ---
 
 # /video-edit
@@ -121,8 +121,12 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
   `<projectsDir>/<short-slug>/` (when the user names a folder for the work, the project goes inside that folder).
   (`~` in config.json is the user's home folder, `C:/Users/<name>` on Windows. The skill's scripts expand it.)
 - **Storyboard mode**: a `.xlsx` storyboard in that folder (or one the user attaches) -> read
-  `references/storyboard.md`, copy it into the project and run `PY SK/scripts/storyboard.py <project> <file.xlsx>`
-  (storyboard.json + its pictures, untouched). Read every scene and LOOK at every picture before cutting.
+  `references/storyboard.md` and run `PY SK/scripts/storyboard.py <project> <file.xlsx>` on the file where it lies
+  (storyboard.json + its pictures and the folder's loose logos / photos, untouched). Read every scene and LOOK at every
+  picture before cutting; name the folder pictures whose file names say nothing. The storyboard is the brief: every
+  VISUALS line becomes a picture card, a graphic (stamp, split, flow, stat, map, closing frame) or a custom insert, and
+  only camera directions are left to the edit. Its MOOD sets the pace of the cut ("Medium": a short breath between
+  sentences) and never opens the reel on silence.
   An audio file in the folder (mp3/m4a/wav) is a music bed: copy it to `<project>/assets/music.<ext>`.
 - Reference links (IG reels, Pinterest pins) for a style: download them and look at frames before designing anything
   (see overlays.md for how to fetch them).
@@ -168,7 +172,7 @@ captions still follow what was said.
 PY SK/scripts/assemble.py <project>          # check_edl first; aroll.mp4 (30fps CFR), segments.json, voice (normalised)
 PY SK/scripts/align.py <project>             # words.json: per-shot word times; exit 1 if a cut clipped a line's ends
 PY SK/scripts/headpos.py <project>           # headpos.json (head top per shot) for placement: 3 masks a shot, no cutout
-PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, cutaways, supers, end card)
+PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, graphics, cutaways, supers, end card)
 ```
 assemble.py cuts the shots side by side into lossless intermediates and compresses the a-roll once (~1 min a reel).
 headpos.py runs the cutout model on 3 frames a shot (seconds on a GPU, under a minute on a CPU), so placement no longer
@@ -192,8 +196,12 @@ metrics.json, assets/sfx). build.py reads everything the scripts wrote; set its 
 - `IMPACT`: a number or year among the punch words that deserves the soft bass hit (or None).
 - Cool girl only: `SCRIPT_PUNCH` (one punch word set in handwriting with a drawn underline, e.g. {'ugly handwriting'})
   and `SPARKLE` (None picks the ✦ words itself; `--plan` prints them).
-- Storyboard mode: open storyboard_plan.json next to the pictures and fix any cutaway that does not illustrate its
-  line (move a/b to that line's shot); the build places cards, split, plates and end card from it.
+- Storyboard mode: read the plan's coverage list (every VISUALS line and what carries it; none may be missing) and
+  each graphic's beat times; fix any beat on the wrong word and any cutaway that does not illustrate its line in
+  storyboard_plan.json. The build draws the graphics (above the head, captions moved under the face, no punch word while
+  one is up), cards, split, plates and end card from it. A 'custom' graphic is built as a transparent insert
+  (step 5, `assets/graphics/<id>.webm`); until it exists build.py prints STORYBOARD NOT ON SCREEN and render.py refuses.
+  Close-ups under a graphic: zoom 1.3 at most (build.py prints TIGHT when a graphic had to shrink to clear the head).
 - Multi-look reels, the orbit, creator cards and the Instagram follow insert: borrow the functions from
   `SK/assets/examples/first-reel-build.py` (the first reel's build; its machinery is documented in its docstring).
 - Iterate from the project folder: `HF lint` (0 errors), then `PY build.py --safe`, then
@@ -244,5 +252,8 @@ EDL / words to `work/vN/` before re-assembling.
 - Words behind the head are the signature move, but only when readable.
 - Storyboard pictures are cards at native size or smaller over a blurred copy of themselves, never full-bleed
   upscales. Supers are lower-third plates; a stepped super lights up step by step as the words are said.
+- A storyboard is followed, not interpreted: VISUALS that describe graphics get those graphics (the under-16 reel's
+  first cut skipped all of them and turned the folder's logos into photo cutaways; the team wanted the graphics). The
+  folder's logos go inside the graphics. Names keep their capitals in the lower-case looks (TikTok, MCMC, UNICEF).
 
 ---

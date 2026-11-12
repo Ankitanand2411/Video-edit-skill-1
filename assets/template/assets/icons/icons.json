@@ -1,0 +1,110 @@
+{
+"bluesky": {
+"bg": "#0285FF",
+"fg": "#FFFFFF"
+},
+"discord": {
+"bg": "#5865F2",
+"fg": "#FFFFFF"
+},
+"epicgames": {
+"bg": "#313131",
+"fg": "#FFFFFF"
+},
+"facebook": {
+"bg": "#0866FF",
+"fg": "#FFFFFF"
+},
+"instagram": {
+"bg": "#E4405F",
+"fg": "#FFFFFF"
+},
+"kick": {
+"bg": "#53FC18",
+"fg": "#000000"
+},
+"line": {
+"bg": "#00C300",
+"fg": "#FFFFFF"
+},
+"linkedin": {
+"bg": "#0A66C2",
+"fg": "#FFFFFF"
+},
+"mastodon": {
+"bg": "#6364FF",
+"fg": "#FFFFFF"
+},
+"messenger": {
+"bg": "#00B2FF",
+"fg": "#FFFFFF"
+},
+"nintendo": {
+"bg": "#E60012",
+"fg": "#FFFFFF"
+},
+"pinterest": {
+"bg": "#BD081C",
+"fg": "#FFFFFF"
+},
+"playstation": {
+"bg": "#0070D1",
+"fg": "#FFFFFF"
+},
+"reddit": {
+"bg": "#FF4500",
+"fg": "#FFFFFF"
+},
+"roblox": {
+"bg": "#000000",
+"fg": "#FFFFFF"
+},
+"signal": {
+"bg": "#3B45FD",
+"fg": "#FFFFFF"
+},
+"snapchat": {
+"bg": "#FFFC00",
+"fg": "#000000"
+},
+"steam": {
+"bg": "#000000",
+"fg": "#FFFFFF"
+},
+"telegram": {
+"bg": "#26A5E4",
+"fg": "#FFFFFF"
+},
+"threads": {
+"bg": "#000000",
+"fg": "#FFFFFF"
+},
+"tiktok": {
+"bg": "#000000",
+"fg": "#FFFFFF"
+},
+"tumblr": {
+"bg": "#36465D",
+"fg": "#FFFFFF"
+},
+"wechat": {
+"bg": "#07C160",
+"fg": "#FFFFFF"
+},
+"whatsapp": {
+"bg": "#25D366",
+"fg": "#FFFFFF"
+},
+"x": {
+"bg": "#000000",
+"fg": "#FFFFFF"
+},
+"youtube": {
+"bg": "#FF0000",
+"fg": "#FFFFFF"
+},
+"zoom": {
+"bg": "#0B5CFF",
+"fg": "#FFFFFF"
+}
+}

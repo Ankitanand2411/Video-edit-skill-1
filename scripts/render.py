@@ -2,7 +2,10 @@
 """Final render, lossless until the last step: <project>/renders/<name>.mp4 (+ the frame-exact audio mix).
 
 Usage (after `PY build.py`):  PY render.py <project_dir> <name> [--crf 12] [--keep-frames] [--browsers N] [--no-fast-png]
-                                                                [--no-overlap] [--minutes N]
+                                                                [--no-overlap] [--minutes N] [--force]
+
+Refuses to start while work/reel.json lists storyboard graphics that are not built (build.py's STORYBOARD NOT ON
+SCREEN): a reel that skips what the storyboard asked for is the wrong reel. --force renders anyway.
 
 Why not `HF render` straight to MP4:
   - its MP4 path captures every frame as JPEG (q95 at --quality high) before encoding: a second lossy step that
@@ -54,8 +57,11 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skillenv  # noqa: E402
 
-STALL, BOOT, SESSION = 40, 180, 150    # s without a new frame / s to the first frame / max frames per session (8 GB and less)
+STALL, BOOT, SESSION = 25, 180, 150    # s without a new frame / s to the first frame / max frames per session (8 GB and
+                                       # less). A drawn frame takes 0.4-1.3s and a stalled session never recovers: 40s of
+                                       # waiting cost the 2-min news reel ~1 min over its two stalls
 PER_BROWSER_MB, RESERVE_MB, MAX_BROWSERS = 700, 1000, 10   # see plan_browsers
+EMPTY_RETRIES = 3                      # a session that draws nothing is tried again this often before giving up
 SMALL_PER_MB, SMALL_RESERVE_MB = 1100, 2000  # 8 GB and less: Chrome + HyperFrames' Node heap per browser, and room for
                                              # the Claude app: the kernel's OOM killer took the app (and the render
                                              # with it) at 3 browsers with 700 / 1000 and again with 850 / 1600;
@@ -188,12 +194,42 @@ def link(src, dst):
         shutil.copyfile(src, dst)
 
 
+def last_error(log):
+    """the reason a HyperFrames session gave up, from its log"""
+    try:
+        with open(log, encoding='utf-8', errors='replace') as fh:
+            lines = [l.strip() for l in fh.read().replace('\r', '\n').splitlines() if 'Failed:' in l or 'Error' in l]
+        return lines[-1][:120] if lines else ''
+    except OSError:
+        return ''
+
+
+def eta_min(stats, left):
+    """minutes still to draw `left` frames at the rate of the sessions so far (stalls included: they are real time)"""
+    f, t = sum(x['frames'] for x in stats), sum(x['seconds'] for x in stats)
+    return round(left * t / f / 60) if f else '?'
+
+
+def memory_hogs():
+    """[(app, MB)] the biggest memory users by program name, without the render's own and the Claude app (POSIX)"""
+    if os.name == 'nt':
+        return []
+    out, own = {}, ('chrome-headless', 'hyperframes', 'node', 'npm', 'mainthread', 'python', 'ffmpeg', 'claude', 'ps')
+    for line in subprocess.run(['ps', '-eo', 'rss=,comm='], **skillenv.TEXT).stdout.splitlines():
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit():
+            name = os.path.basename(parts[1].strip()).split()[0]
+            if not any(o in name.lower() for o in own):
+                out[name] = out.get(name, 0) + int(parts[0]) // 1024
+    return sorted(((n, mb) for n, mb in out.items() if mb >= 150), key=lambda x: -x[1])
+
+
 def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=None):
     cdir, safe = os.path.join(proj, 'renders', f'{name}_work'), os.path.join(proj, 'renders', f'{name}_frames')
     os.makedirs(safe, exist_ok=True)
     have = lambda n: os.path.exists(os.path.join(safe, f'{n:05d}.png'))
     stats = [] if stats is None else stats
-    start, stalls, rejected = 0, 0, {}
+    start, stalls, rejected, empty = 0, 0, {}, {}
     while True:
         while start < total and have(start):
             start += 1
@@ -225,6 +261,11 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=Non
         before_dirs, before_chrome = work_dirs(cdir), chrome_pids()
         print(f'session from frame {start} ({start / 30:.2f}s): {end - start} frames, {browsers} browser{"s" * (browsers > 1)}'
               f' ({avail_mb or "?"} MB free of {total_mb or "?"})', flush=True)
+        if not start and not force and small and browsers == 1 and avail_mb:   # say what one more browser would take
+            need = SMALL_RESERVE_MB + 2 * SMALL_PER_MB
+            hogs = ', '.join(f'{n} {mb} MB' for n, mb in memory_hogs()[:4])
+            print(f'   one browser: {avail_mb} MB free, two need ~{need} MB (about twice as fast).'
+                  + (f' Open apps holding memory: {hogs}. Closing some before a render frees it.' if hogs else ''), flush=True)
         got, t0, linked = 0, time.time(), set()
         with open(log, 'w', encoding='utf-8') as fh:
             kw = {'creationflags': subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == 'nt' else {'start_new_session': True}
@@ -278,11 +319,18 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=Non
                          f'(finished frames are kept). See {log}')
             continue
         stats.append({'frames': got, 'seconds': dt, 'browsers': browsers, 'drawing': drew, 'fast_png': fast_png_on(text)})
-        print(f'   +{got} frames ({dt:.0f}s, {got / max(dt, .01):.2f} frames/s, drawing on {drew})', flush=True)
+        done = sum(1 for n in range(total) if have(n))
+        print(f'   +{got} frames ({dt:.0f}s, {got / max(dt, .01):.2f} frames/s, drawing on {drew})  {done}/{total} drawn, '
+              f'about {eta_min(stats, total - done)} min to go', flush=True)
         if os.path.exists(os.path.join(proj, html)):
             os.remove(os.path.join(proj, html))
-        if got == 0 and not have(start):
-            sys.exit(f'no progress from frame {start}: see {log}')
+        if got == 0 and not have(start):   # Chrome short of memory dies before its first frame ("Unable to capture
+            empty[start] = empty.get(start, 0) + 1   # screenshot" at 1.5 GB free): the same frame drew fine on a retry
+            if empty[start] > EMPTY_RETRIES:
+                sys.exit(f'no progress from frame {start} in {empty[start]} tries: see {log}')
+            print(f'   no frame drawn ({last_error(log) or "no output"}): trying again '
+                  f'({empty[start]}/{EMPTY_RETRIES}){", close other apps to free memory" if small else ""}', flush=True)
+            time.sleep(8)
 
 
 def missing_pieces(proj, frames_of=None):
@@ -389,6 +437,9 @@ def main():
     with open(os.path.join(proj, 'work', 'reel.json'), encoding='utf-8') as fh:
         reel = json.load(fh)
     total = reel['frames']
+    if reel.get('storyboard_missing') and '--force' not in sys.argv:   # build.py: storyboard VISUALS with nothing on screen
+        sys.exit('the storyboard asks for graphics that are not built yet (build.py lists them under STORYBOARD NOT ON SCREEN):\n  '
+                 + '\n  '.join(reel['storyboard_missing']) + '\nbuild them (references/overlays.md), or --force to render without them')
     gone = missing_pieces(proj)
     if gone:
         sys.exit(f'{len(gone)} cutout pieces missing or short ({gone[0]} ...): run cutout.py first (build.py moved them)')

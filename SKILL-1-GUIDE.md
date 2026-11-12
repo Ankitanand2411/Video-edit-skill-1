@@ -45,7 +45,7 @@ Put your raw clip(s) and your storyboard spreadsheet (.xlsx) in one folder, then
 /video-edit edit the clip in "~/Desktop/My reel" with the storyboard, cool dude style
 ```
 
-The storyboard needs one row per scene: a `SCENE` column, a `STORYBOARD` column with `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and the scene's picture placed in that row. The skill puts each picture on screen as a sharp card while you talk (never upscaled), turns the supers into on-screen titles, builds a split screen for "A vs. B", and ends on a card with the last super. Add an mp3 to the folder for a music bed.
+The storyboard needs one row per scene: a `SCENE` column, a `STORYBOARD` column with `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and (optionally) the scene's picture placed in that row. The skill puts each picture on screen as a sharp card while you talk (never upscaled), builds the graphics the VISUALS describe (stamped phone, split screen, flowchart, stat card, map, closing frame) on the words that name them, turns the supers into on-screen titles, and ends on the closing frame or a card with the last super. Put the logos the graphics need in the same folder, named after the brand ("roblox logo.jpg"). Add an mp3 to the folder for a music bed.
 
 ## Choose a Look
 

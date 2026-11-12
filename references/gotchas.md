@@ -172,6 +172,25 @@
 - Large file uploads to chat can fail: deliver a 720p crf 26-28 phone copy and keep the full render on disk.
 - Pinterest/Instagram pages block logged-out browsing; curl the page HTML or use Apify.
 
+## Storyboard
+- A storyboard whose rows have no pictures is not a storyboard without visuals: the under-16 reel's VISUALS described
+  six graphics (a stamped phone, a banned-vs-allowed split, a flowchart, a stat card, a map, a closing frame) and the
+  first cut showed none of them, turning the folder's logos into full-screen photo cutaways instead. sbgraphics.py
+  reads those lines, storyboard_plan.py times them and prints the coverage list, build.py draws them, render.py refuses
+  while one is missing. Never "improve" a storyboard by swapping its graphic for a photo.
+- Whisper splits "100,000" into "100" ",000" and "in-game" into "in" "-game": the EDL line writes them whole (they are
+  the caption text), and the planner matches numbers by their digits.
+- A flow step nobody says word for word ("Radicalisation / Exploitation") lights on the first of its keywords said
+  after the step before ("extremist"); the planner once took the longest keyword and lit it 12s late, inside the next
+  graphic. Read the beat times it prints.
+- HyperFrames lint `gsap_cold_seek_hidden_fromto_missing_reveal`: an element hidden by gsap.set and revealed by a
+  fromTo must have autoAlpha:1 in the destination vars too, or a cold render worker leaves it invisible.
+- Quick graphics check without HyperFrames: copy index.html to work/preview.html with `<base href="../">` and
+  `<script>window.__timelines = {};</script>` in the head, serve the project folder, open it in a browser and call
+  `window.__timelines.main.seek(t)`. Snapshots (`HF snapshot`) stay the proof.
+- Lower-case looks lowercased names ("tiktok", "mcmc", "unicef", "australia"): build.py keeps a capital on any word
+  written capitalised inside a sentence in the EDL lines or the storyboard script, and on every name a graphic shows.
+
 ## Windows (same skill, different shell)
 - Claude Code on Windows runs commands in Git Bash when Git for Windows is installed, otherwise in PowerShell, and
   both can be available at once. Write commands that work in both: full paths in double quotes with forward
