@@ -61,6 +61,7 @@ STALL, BOOT, SESSION = 25, 180, 150    # s without a new frame / s to the first 
                                        # less). A drawn frame takes 0.4-1.3s and a stalled session never recovers: 40s of
                                        # waiting cost the 2-min news reel ~1 min over its two stalls
 PER_BROWSER_MB, RESERVE_MB, MAX_BROWSERS = 700, 1000, 10   # see plan_browsers
+EMPTY_RETRIES = 3                      # a session that draws nothing is tried again this often before giving up
 SMALL_PER_MB, SMALL_RESERVE_MB = 1100, 2000  # 8 GB and less: Chrome + HyperFrames' Node heap per browser, and room for
                                              # the Claude app: the kernel's OOM killer took the app (and the render
                                              # with it) at 3 browsers with 700 / 1000 and again with 850 / 1600;
@@ -193,6 +194,16 @@ def link(src, dst):
         shutil.copyfile(src, dst)
 
 
+def last_error(log):
+    """the reason a HyperFrames session gave up, from its log"""
+    try:
+        with open(log, encoding='utf-8', errors='replace') as fh:
+            lines = [l.strip() for l in fh.read().replace('\r', '\n').splitlines() if 'Failed:' in l or 'Error' in l]
+        return lines[-1][:120] if lines else ''
+    except OSError:
+        return ''
+
+
 def eta_min(stats, left):
     """minutes still to draw `left` frames at the rate of the sessions so far (stalls included: they are real time)"""
     f, t = sum(x['frames'] for x in stats), sum(x['seconds'] for x in stats)
@@ -218,7 +229,7 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=Non
     os.makedirs(safe, exist_ok=True)
     have = lambda n: os.path.exists(os.path.join(safe, f'{n:05d}.png'))
     stats = [] if stats is None else stats
-    start, stalls, rejected = 0, 0, {}
+    start, stalls, rejected, empty = 0, 0, {}, {}
     while True:
         while start < total and have(start):
             start += 1
@@ -313,8 +324,13 @@ def frames_of(proj, name, total, force=None, stats=None, fast=True, deadline=Non
               f'about {eta_min(stats, total - done)} min to go', flush=True)
         if os.path.exists(os.path.join(proj, html)):
             os.remove(os.path.join(proj, html))
-        if got == 0 and not have(start):
-            sys.exit(f'no progress from frame {start}: see {log}')
+        if got == 0 and not have(start):   # Chrome short of memory dies before its first frame ("Unable to capture
+            empty[start] = empty.get(start, 0) + 1   # screenshot" at 1.5 GB free): the same frame drew fine on a retry
+            if empty[start] > EMPTY_RETRIES:
+                sys.exit(f'no progress from frame {start} in {empty[start]} tries: see {log}')
+            print(f'   no frame drawn ({last_error(log) or "no output"}): trying again '
+                  f'({empty[start]}/{EMPTY_RETRIES}){", close other apps to free memory" if small else ""}', flush=True)
+            time.sleep(8)
 
 
 def missing_pieces(proj, frames_of=None):
