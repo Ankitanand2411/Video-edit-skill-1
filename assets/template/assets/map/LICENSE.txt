@@ -1,0 +1,3 @@
+countries-110m.json: world-atlas 2.0.2 (https://github.com/topojson/world-atlas, ISC licence), a TopoJSON conversion
+of Natural Earth's 1:110m admin-0 countries (public domain, https://www.naturalearthdata.com).
+build.py decodes it and draws the countries a storyboard map names.

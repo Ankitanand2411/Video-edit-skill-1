@@ -8,16 +8,23 @@ Expected sheet (one row per scene, header row names the columns, any order):
   plus optional BRAND / TITLE and MOOD cells above the table (e.g. "Color, Music, Pace: Vibrant, Inspirational, Medium").
 
 Writes:
-  storyboard.json   {"title", "mood", "scenes": [{"scene", "visuals": [...], "super", "script", "image", "image_size"}]}
+  storyboard.json   {"title", "mood", "scenes": [{"scene", "visuals": [...], "super", "script", "images"}],
+                     "folder_images": [{"file", "names", "kind", "size"}]}
   assets/storyboard/<nn>-<scene>.<ext>   every embedded picture, byte-for-byte (no re-encode: full quality is kept;
                                          build.py makes exact-size display copies from these)
+  assets/storyboard/folder/<name>.<ext>  the loose pictures next to the spreadsheet (logos, photos the graphics use:
+                                         "roblox logo.jpg"), byte-for-byte. Their names come from the file names
+                                         ("roblox logo" -> names ["roblox"], kind logo); a file named only "image.png"
+                                         or "images logo.png" gets no name: LOOK at it and write its names in.
 Standard library only (an .xlsx is a zip of XML parts).
 """
 import json
 import os
 import posixpath
 import re
+import shutil
 import struct
+import subprocess
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
@@ -65,6 +72,36 @@ def image_size(data):
                 return w, h
             i += 2 + seg
     return None
+
+
+IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.webp', '.avif', '.gif', '.bmp', '.svg')
+GENERIC = {'image', 'images', 'img', 'logo', 'logos', 'photo', 'photos', 'picture', 'pic', 'icon', 'and', 'with', 'the', 'of',
+           'copy', 'final', 'new', 'hd', 'png', 'jpg', 'screenshot', 'banner', 'cover', 'thumbnail', 'file'}
+
+
+def probe_size(f):
+    out = subprocess.run([skillenv.tool('ffprobe'), '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height',
+                          '-of', 'csv=p=0', f], **skillenv.TEXT).stdout.strip().split(',')
+    return [int(out[0]), int(out[1])] if len(out) == 2 and all(x.isdigit() for x in out) else None
+
+
+def folder_images(src, proj):
+    """the pictures lying next to the spreadsheet -> assets/storyboard/folder/, untouched; names from the file names"""
+    d, out = os.path.dirname(os.path.abspath(src)), []
+    dst = os.path.join(proj, 'assets', 'storyboard', 'folder')
+    for fn in sorted(os.listdir(d)):
+        stem, ext = os.path.splitext(fn)
+        if ext.lower() not in IMAGE_EXT or not os.path.isfile(os.path.join(d, fn)):
+            continue
+        os.makedirs(dst, exist_ok=True)
+        slug = re.sub(r'[^a-z0-9]+', '-', stem.lower()).strip('-') or 'image'
+        shutil.copyfile(os.path.join(d, fn), os.path.join(dst, slug + ext.lower()))   # byte-for-byte
+        words = re.findall(r'[a-z0-9]+', stem.lower())
+        names = [w for w in words if w not in GENERIC and not w.isdigit()]
+        kind = 'logo' if ('logo' in words or 'icon' in words) and not {'image', 'photo', 'picture'} & set(words) else 'photo'
+        out.append({'file': f'assets/storyboard/folder/{slug}{ext.lower()}', 'source': fn, 'names': names, 'kind': kind,
+                    'size': probe_size(os.path.join(dst, slug + ext.lower()))})
+    return out
 
 
 def blocks(text):
@@ -155,13 +192,16 @@ def main():
                 fh.write(data)   # untouched bytes: no quality lost
             sc['images'].append({'file': f'assets/storyboard/{fn}', 'size': image_size(data), 'source_part': part})
         scenes.append(sc)
-    sb = {'source': os.path.abspath(src), 'title': title, 'mood': mood, 'scenes': scenes}
+    sb = {'source': os.path.abspath(src), 'title': title, 'mood': mood, 'scenes': scenes, 'folder_images': folder_images(src, proj)}
     with open(os.path.join(proj, 'storyboard.json'), 'w', encoding='utf-8') as fh:
         json.dump(sb, fh, indent=1, ensure_ascii=False)
     print(f"{title}  |  mood: {' / '.join(l.strip('- ') for l in mood.splitlines() if l.strip())}")
     for s in scenes:
         imgs = ', '.join(f"{i['file']} {i['size'][0]}x{i['size'][1]}" for i in s['images']) or 'no image'
         print(f"- {s['scene']}: super {s['super']!r} | {imgs}\n    script: {s['script'][:110]}")
+    for f in sb['folder_images']:
+        print(f"folder picture {f['source']!r} -> {f['file']} {f['kind']} {f['size'] and 'x'.join(map(str, f['size']))}  names "
+              + (', '.join(f['names']) if f['names'] else 'NONE: look at it and write its names into storyboard.json'))
 
 
 if __name__ == '__main__':

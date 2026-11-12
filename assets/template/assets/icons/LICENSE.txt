@@ -1,0 +1,4 @@
+Brand icons from Simple Icons 13.21.0 (https://simpleicons.org), released under CC0 1.0 (public domain dedication).
+The marks themselves remain the trademarks of their owners: the reel shows one only where the storyboard names the
+platform (editorial use, e.g. a news explainer about TikTok's age limit), never as the creator's own branding.
+icons.json holds the tile colours used behind each glyph.

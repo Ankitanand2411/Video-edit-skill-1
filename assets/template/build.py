@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """/video-edit template: a talking-head reel with every spoken word on screen, punch words tucked behind the head,
-and (when the project has storyboard_plan.json) the storyboard's pictures, supers and end card.
+and (when the project has storyboard_plan.json) the storyboard's pictures, the graphics its VISUALS describe (stamp,
+split, flow, stat, map: dark panels above the head, each element on its word), its supers and its end card.
 It is the finished build of a real reel ("how handwriting helps the brain learn to read": one 87s phone clip + a
 5-scene storyboard -> a 68s cool dude reel). Copy it into the project; set the CONTENT block; run it.
 
@@ -10,7 +11,8 @@ Inputs (written by the skill's scripts, nothing to hand-type):
   assets/fonts/metrics.json (font metrics: placement and line widths are computed, not eyeballed)
 CONTENT to set per reel: LOOK, PUNCH (empty = automatic picks, printed: review them), FIX, IMPACT, and in the cool
 girl look SCRIPT_PUNCH (a punch word set in handwriting with a drawn underline) and SPARKLE (None = automatic picks).
-MACHINERY (keep): looks, caption lines, behind-head placement, storyboard layer, grades, audio lanes, --range, SAFE_GUIDE.
+MACHINERY (keep): looks, caption lines, behind-head placement, storyboard layer, graphics layer, grades, audio lanes,
+--range, SAFE_GUIDE. assets/icons (platform icons, CC0) and assets/map (world map, public domain) feed the graphics.
 
 PY build.py               writes index.html
 PY build.py --safe        same + red Instagram safe-zone guide (snapshots only, never render with it)
@@ -22,6 +24,7 @@ a-roll frames the cutout must cover (only where something sits behind the head; 
 cutout differently from the room) in pieces of up to 10 s. Run scripts/cutout.py after every build that moves them.
 """
 import json
+import math
 import os
 import re
 import shutil
@@ -67,6 +70,10 @@ CREAM, PAPER, YEL = '#F2EFE9', '#F7F4EE', '#FAE67A'
 METRICS = load('assets/fonts/metrics.json')
 HEADPOS = load('headpos.json', {})
 PLAN = load('storyboard_plan.json')
+GFX = [dict(g) for g in (PLAN or {}).get('graphics', [])]   # storyboard VISUALS drawn as graphics (graphics layer below)
+GFX_WIN = [w for g in GFX for w in [(g['a'], g['b'])] + ([(g['then']['a'], g['then']['b'])] if g.get('then') else [])]
+CAPS_LOW = bool(GFX)   # the graphics own the wall space above the head: the running captions move under the face
+CHEST = {'wide': 1240, 'close': 1310}   # caption line under the chin (1080x1920), above the lower-third plates at 1398
 
 LOOKS = {   # references/looks.md has the why of every value
     'dude': {'room': 'contrast(1.08) saturate(.92) brightness(.86) hue-rotate(-4deg)',      # room moody (storyboard "vibrant": a touch lifted)
@@ -139,9 +146,20 @@ def head_at(sid, t):
 
 
 def caps_top(sid):
+    if CAPS_LOW:
+        return CHEST[shot(sid)]
     k, xh, cap = pmet()
     s0 = PU['size'][shot(sid)]
     return round(max(228, min(CAPS_MAX[shot(sid)], min(head_samples(sid)) + (.2 * xh - 1.05 * cap) * s0 - CAP_LH - 24)))
+
+
+def top_limit(sid):
+    """highest y a word or card above the head may reach: under the caption line, or the safe top when it sits low"""
+    return 228 if CAPS_LOW else caps_top(sid) + CAP_LH + 24
+
+
+def gfx_at(a, b):
+    return any(x < b and a < y for x, y in GFX_WIN)
 
 
 SMALL = .55        # a behind-head word under 55% of the look's size reads as a mistake: build.py says so
@@ -169,12 +187,54 @@ def behind_head(sid, a, b, text, it):
     hd = min(head_at(sid, a), head_at(sid, min(b, a + .6)))   # highest the head gets while the word lands
     pad = .04 if PU['anim'] == 'mask' else 0
     fit = SERIF_W / text_width(text, 1, PU['font_it'] if it else PU['font'], PU['track'], pad)
-    clear = (hd - caps_top(sid) - CAP_LH - 24) / (1.05 * cap - .2 * xh)
+    clear = (hd - top_limit(sid)) / (1.05 * cap - .2 * xh)
     size = int(min(PU['size'][shot(sid)], fit, clear))
     return round(hd + (.2 * xh - k) * size), size
 
 
 # ------------------------------------------------------------------ words + punch words
+STOP = set("a an and the of to in on at by for with from as is it its it's be are was were this that these those i we you they he "
+           "she my our your their me us them so but or if then than too very just can could would will about into over up down out "
+           "not no yes all some any each every while when where what which who how before after because really actually even also "
+           "maybe kind lot get got do does did have has had being been know thing things there here like much many more most part "
+           "well way still only there's they're doesn't don't can't won't isn't aren't it's that's here's what's another "
+           "i'm you're we're".split())
+
+
+def proper_words():
+    """words a lower-case look keeps capitalised: capitalised inside a sentence somewhere (the EDL lines, the
+    storyboard script), and the names the graphics show. The first reel from a news storyboard printed "tiktok",
+    "mcmc", "unicef" and "australia"."""
+    texts = [s.get('line', '') for s in (load('edl.json') or [])]
+    texts += [s.get('script', '') for s in (load('storyboard.json') or {}).get('scenes', [])]
+    out = set()
+    for t in texts:
+        start = True
+        for tok in re.findall(r"[\w'’-]+|[.?!:]", t):
+            if tok in '.?!:':   # a capital after a colon opens a sentence too ("the real question: Are we")
+                start = True; continue
+            base = re.sub(r"[^\w-]", '', tok.split("'")[0].split('’')[0]).lower()
+            if not start and tok[:1].isupper() and base not in STOP:
+                out.add(base)
+            start = False
+    for g in GFX:
+        for n in g.get('apps', []) + [i for sd in g.get('sides', []) for i in sd['items']] + g.get('places', []) + g.get('targets', []):
+            out.update(x.lower() for x in re.findall(r'\w+', n))
+    return out
+
+
+PROPER = proper_words()
+
+
+def shown(text):
+    """a word as a lower-case look shows it: lower case, except names (TikTok, MCMC, Malaysia's) and "I" """
+    core = re.sub(r"[^\w'’-]", '', text)
+    base = re.sub(r"[^\w-]", '', core.split("'")[0].split('’')[0]).lower()
+    if base == 'i' or core[:1].isupper() and base in PROPER or any(c.isupper() for c in core[1:]):
+        return text
+    return text.lower()
+
+
 def load_words():
     out = []
     for w in load('words.json'):
@@ -185,15 +245,12 @@ def load_words():
         if core in FIX:
             t = t.replace(core, FIX[core])
         out.append({'text': t, 'start': w['start'], 'end': w['end'], 'seg': w.get('seg') or seg_at(w['start'] + .02)})
+    for w in out:   # lower-case looks: sentence-initial capitals go, names keep theirs
+        w['shown'] = shown(w['text'])
     return out
 
 
 WORDS = load_words()
-STOP = set("a an and the of to in on at by for with from as is it its it's be are was were this that these those i we you they he "
-           "she my our your their me us them so but or if then than too very just can could would will about into over up down out "
-           "not no yes all some any each every while when where what which who how before after because really actually even also "
-           "maybe kind lot get got do does did have has had being been know thing things there here like much many more most part "
-           "well way still only".split())
 
 
 def norm(t):
@@ -257,6 +314,8 @@ def auto_punch():
             n = norm(w['text'])
             if w['seg'] != sid or n in STOP or len(n) < 3 or (len(n) < 5 and not n.isdigit() and n.rstrip('s') not in kw):
                 continue
+            if gfx_at(w['start'] - .05, w['start'] + .7):   # a graphic owns the space above the head then
+                continue
             end = w['text'].rstrip()[-1:]
             score = (10 * (n.rstrip('s') in kw) + 8 * n.isdigit() + (3 if end in '.?!' else 2 if end == ',' else 0) + min(len(n), 10)
                      - 8 * (n.endswith('ly') or n in FILLER))
@@ -266,8 +325,15 @@ def auto_punch():
             if score >= 6 and len(picked) < (2 if dur > 3.8 else 1) and all(abs(w['start'] - q['start']) > 1.4 for q in picked):
                 picked.append(w)
         for w in sorted(picked, key=lambda w: w['start']):
-            disp = norm(w['text']) + ('.' if w['text'].rstrip()[-1:] == '.' else '')
-            out.append((w['start'], norm(w['text']), disp, False))
+            # the word as the thought lands: its ? or ! or . kept, its article with it ("a win?", "a stranger")
+            k = WORDS.index(w)
+            art = WORDS[k - 1] if k and WORDS[k - 1]['seg'] == sid and norm(WORDS[k - 1]['text']) in ('a', 'an', 'the') else None
+            end = w['text'].rstrip()[-1:]
+            disp = re.sub(r"[^\w'’-]", '', w['shown']) + (end if end in '.?!' else '')
+            key = norm(w['text'])
+            if art:
+                disp, key = f"{norm(art['text'])} {disp}", f"{norm(art['text'])} {key}"
+            out.append(((art or w)['start'], key, disp, False))
     return out
 
 
@@ -297,8 +363,8 @@ def punch_t(text):
 
 # ------------------------------------------------------------------ caption lines (balanced by measured width)
 def cap_text(t):
-    t = re.sub(r"[^\w'-]", '', t)
-    return t.upper() if CAP['case'] == 'upper' else t.lower()
+    t = re.sub(r"[^\w'’-]", '', t)
+    return t.upper() if CAP['case'] == 'upper' else t   # lower-case looks: already cased by shown() (names kept)
 
 
 WEAK = {'a', 'the', 'of', 'to', 'and', 'my', 'our', 'in', 'at', 'by', 'with', 'or'}   # don't end a line on these
@@ -336,7 +402,7 @@ def caps_groups():
         phrases.append(cur)
     groups = []
     for ph in phrases:
-        txts = [cap_text(w['text']) for w in ph]
+        txts = [cap_text(w['shown']) for w in ph]
         for a, b in split_lines(txts, 900):
             groups.append({'sid': ph[a]['seg'], 'words': [(max(w['start'], T[w['seg']] + .02), t) for w, t in zip(ph[a:b], txts[a:b])]})
     for k, g in enumerate(groups):   # a line stays up until the next line of the same shot replaces it
@@ -414,7 +480,7 @@ for _c in CUTAWAYS:   # a punch word gets ~1s on screen before a cutaway covers 
             _c['a'] = round(_p[1] + 1.0, 3)
 for _c in CUTAWAYS:   # card rectangles, integer pixels, under the caption line of the shot the cutaway opens on
     if _c['kind'] == 'card':
-        _top = caps_top(seg_at(_c['a'] + .02)) + CAP_LH + 28
+        _top = top_limit(seg_at(_c['a'] + .02)) + 4
         _w, _h = fit(_c['image'], CARD_MAX_W, CARD_BOTTOM - _top)
         _c.update(w=_w, h=_h, x=(1080 - _w - 2 * BORDER) // 2, y=_top)
 
@@ -523,7 +589,8 @@ def supers():
             words = s['text'].split()
             spans = ''.join(f'<span id="{sid_}-w{k}" class="st{" y" if k >= len(words) - s.get("yellow_last", 0) else ""}">{w}</span>'
                             for k, w in enumerate(words))
-            html.append(f'<div class="lt"><div id="{sid_}" class="plate words">{spans}</div></div>')
+            icon = f'<span class="pi">{SVG[s["icon"]]}</span>' if s.get('icon') in SVG else ''   # the SUPER's emoji, drawn
+            html.append(f'<div class="lt"><div id="{sid_}" class="plate words">{icon}{spans}</div></div>')
             tw += [f"gsap.set('#{sid_}',{{autoAlpha:0}});", f"gsap.set('#{sid_} .st',{{autoAlpha:0}});",
                    f"tl.fromTo('#{sid_}',{{autoAlpha:0}},{{autoAlpha:1,duration:.25,immediateRender:false}},{a:.3f});",
                    f"tl.fromTo('#{sid_} .st',{{autoAlpha:0,scaleX:1.45,filter:'blur(8px)'}},{{autoAlpha:1,scaleX:1,filter:'blur(0px)',"
@@ -544,6 +611,27 @@ def end_card():
         inner += [f'<img class="ebg" src="{backdrop(ENDC["image"])}" alt="">', card_html('end-card', ENDC['image'], x, y, w, h, 2)]
         tw += ["gsap.set('#end-card',{autoAlpha:0});"] + rise_in('#end-card', END_IN + .06)
         top = y + h + 2 * BORDER + 20
+    if ENDC.get('cta'):   # the closing frame: a verb pill (tapped), the name, the tagline
+        c = ENDC['cta']
+        y = top + 60 if ENDC.get('image') else 700
+        name = c.get('name') or ''
+        ns = int(min(128, SERIF_W / max(1e-6, text_width(name, 1, 'InterTight-900-normal'))))
+        if c.get('verb'):
+            inner.append(f'<div id="end-v" class="ctp" style="top:{y}px">{c["verb"]}</div><div id="end-tap" class="tap" style="top:{y + 6}px"></div>')
+            y += 110
+        inner.append(f'<div id="end-n" class="ctn" style="top:{y}px;font-size:{ns}px">{name}</div>')
+        y += round(ns * 1.12)
+        sub = ' · '.join(x for x in (c.get('tagline', ''), c.get('handle', '')) if x)
+        if sub:
+            inner.append(f'<div id="end-t" class="ctt" style="top:{y + 8}px">{sub.upper()}</div>')
+        tw += ["gsap.set(['#end-v','#end-n','#end-t','#end-tap'],{autoAlpha:0});"]
+        if c.get('verb'):
+            tw += [pop('#end-v', END_IN + .3, .4, 'scale:.5'),
+                   f"tl.fromTo('#end-tap',{{autoAlpha:.9,scale:.2}},{{autoAlpha:0,scale:1.6,duration:.55,ease:'power2.out',immediateRender:false}},{END_IN + 1.35:.3f});",
+                   f"tl.fromTo('#end-v',{{scale:.9}},{{scale:1,duration:.3,ease:'back.out(2)',immediateRender:false}},{END_IN + 1.35:.3f});"]
+        tw += [f"tl.fromTo('#end-n',{{autoAlpha:0,y:30}},{{autoAlpha:1,y:0,duration:.45,ease:'power3.out',immediateRender:false}},{END_IN + .5:.3f});"]
+        if sub:
+            tw += [f"tl.fromTo('#end-t',{{autoAlpha:0,y:14}},{{autoAlpha:1,y:0,duration:.4,ease:'power2.out',immediateRender:false}},{END_IN + .8:.3f});"]
     for k, line in enumerate(ENDC.get('lines', [])):
         it = k == len(ENDC['lines']) - 1 and len(ENDC['lines']) > 1   # the last line: italic, accent colour
         size = int(min(150, SERIF_W / text_width(line, 1, PU['font_it'] if it else PU['font'], PU['track'], .04)))
@@ -552,6 +640,434 @@ def end_card():
         tw += punch_in(f'#end-l{k}', END_IN + .55 + .6 * k)
         top += round(size * 1.12)
     return [f'<div id="endc" style="z-index:20">{"".join(inner)}</div>'], tw
+
+
+# ------------------------------------------------------------------ storyboard graphics (storyboard_plan.json 'graphics')
+# VISUALS that describe a graphic, not a picture (scripts/sbgraphics.py): drawn here as dark panels in the wall space
+# above the head, every element on the word that names it, the speaker in view the whole time. The first reel from a
+# storyboard like this showed none of them (only pictures were understood); these are what the storyboard asked for.
+GFX_TOP, GFX_W = 236, 940
+GFX_X = (1080 - GFX_W) // 2
+GOLD, RED, GREEN = '#F6D64A', '#EF4444', '#22C55E'
+TONE = {'red': RED, 'green': GREEN, 'yellow': GOLD, 'blue': '#3B82F6'}
+ICONS = load('assets/icons/icons.json', {})
+MISSING = []      # storyboard VISUALS not on screen: work/reel.json carries them and render.py refuses to start
+GFX_TIGHT = []    # graphics scaled down hard to clear a high head (a close-up under a graphic)
+SVG = {   # small glyphs (the fonts have no emoji): plates, chips, locks, the flipped banner
+    'no': '<svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.3" fill="none" stroke="#EF4444" stroke-width="2.6"/>'
+          '<path d="M5.6 18.4 18.4 5.6" stroke="#EF4444" stroke-width="2.6"/></svg>',
+    'warn': '<svg width="28" height="28" viewBox="0 0 24 24"><path d="M12 2.6 22.8 21.2H1.2Z" fill="#F6D64A"/>'
+            '<path d="M12 9.2v5.6" stroke="#111" stroke-width="2.4" stroke-linecap="round"/><circle cx="12" cy="17.9" r="1.4" fill="#111"/></svg>',
+    'gamepad': '<svg width="28" height="28" viewBox="0 0 24 24"><path d="M7.2 6.5h9.6a5.2 5.2 0 0 1 5.1 6.2l-.8 4.1a2.7 2.7 0 0 1-4.7 '
+               '1.2l-1.8-2.3H9.4l-1.8 2.3a2.7 2.7 0 0 1-4.7-1.2l-.8-4.1a5.2 5.2 0 0 1 5.1-6.2Z" fill="currentColor"/>'
+               '<path d="M7.6 9.6v3.6M5.8 11.4h3.6" stroke="#0d1015" stroke-width="1.7" stroke-linecap="round"/>'
+               '<circle cx="15.6" cy="10.4" r="1.05" fill="#0d1015"/><circle cx="17.6" cy="12.4" r="1.05" fill="#0d1015"/></svg>',
+    'target': '<svg width="28" height="28" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.5" fill="none" stroke="#EF4444" stroke-width="2.4"/>'
+              '<circle cx="12" cy="12" r="5.5" fill="none" stroke="#EF4444" stroke-width="2.4"/><circle cx="12" cy="12" r="1.8" fill="#EF4444"/></svg>',
+    'phone': '<svg width="28" height="28" viewBox="0 0 24 24"><rect x="6.5" y="2" width="11" height="20" rx="2.6" fill="none" stroke="currentColor" '
+             'stroke-width="2"/><path d="M10.5 18.5h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    'check': '<svg width="28" height="28" viewBox="0 0 24 24"><path d="m4.5 12.5 4.8 4.8L19.5 7" fill="none" stroke="#22C55E" stroke-width="3" '
+             'stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    'cross': '<svg width="28" height="28" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18" stroke="#EF4444" stroke-width="3" stroke-linecap="round"/></svg>',
+    'lock': '<svg width="16" height="16" viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="11" rx="2.4" fill="#fff"/>'
+            '<path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" fill="none" stroke="#fff" stroke-width="2.6"/></svg>',
+}
+
+
+def icon_path(slug):
+    try:
+        with open(f'assets/icons/{slug}.svg', encoding='utf-8') as fh:
+            return re.search(r'<path d="([^"]+)"', fh.read()).group(1)
+    except (OSError, AttributeError):
+        return None
+
+
+def tile_w(art, size, wide=True):
+    """a tile is square; a wide logo (a wordmark like Minecraft's) gets a wide tile, up to 2:1"""
+    if wide and (art or {}).get('logo'):
+        w, h = img_size(art['logo'])
+        if w / h > 1.3:
+            return round(size * min(2.0, w / h))
+    return size
+
+
+def tile_copy(src, w, h, cover):
+    """exact-size copy for a tile, drawn 1:1: a photo fills it (centre crop), a logo fits inside it"""
+    os.makedirs('assets/storyboard/disp', exist_ok=True)
+    out = f"assets/storyboard/disp/{os.path.splitext(os.path.basename(src))[0]}_{'c' if cover else 'f'}{w}x{h}.png"
+    if not os.path.exists(out):
+        vf = (f'scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,crop={w}:{h}' if cover else
+              f'scale={w - 12}:{h - 12}:force_original_aspect_ratio=decrease:flags=lanczos,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color=0x0d1015')
+        subprocess.run([FF, '-v', 'error', '-y', '-i', src, '-vf', vf, '-frames:v', '1', '-pix_fmt', 'rgb24', out], check=True)
+    return out
+
+
+def tile(tid, name, art, size, label=True, x=0, y=0, wide=True):
+    """an entity's tile: the folder's own logo (the user's file wins), else the platform icon on its brand colour,
+    else the folder photo, else its initials"""
+    art, r = art or {}, round(size * .24)
+    w = tile_w(art, size, wide)
+    box = f'width:{w}px;height:{size}px;border-radius:{r}px'
+    if art.get('logo'):
+        lw, lh = img_size(art['logo'])
+        face = (f'<div class="tl" style="{box};background:#0d1015"><img src="{tile_copy(art["logo"], w, size, abs(lw / lh - w / size) < .15)}" '
+                f'width="{w}" height="{size}" alt=""></div>')
+    elif art.get('icon') and icon_path(art['icon']):
+        c = ICONS.get(art['icon'], {'bg': '#111111', 'fg': '#FFFFFF'})
+        bg = ('radial-gradient(circle at 30% 107%,#fdf497 0%,#fdf497 5%,#fd5949 45%,#d6249f 60%,#285AEB 90%)'
+              if art['icon'] == 'instagram' else c['bg'])
+        g = round(size * .52)
+        face = (f'<div class="tl" style="{box};background:{bg}"><svg width="{g}" height="{g}" viewBox="0 0 24 24">'
+                f'<path d="{icon_path(art["icon"])}" fill="{c["fg"]}"/></svg></div>')
+    elif art.get('photo'):
+        face = f'<div class="tl" style="{box}"><img src="{tile_copy(art["photo"], w, size, True)}" width="{w}" height="{size}" alt=""></div>'
+    else:
+        face = (f'<div class="tl" style="{box};background:#2a2f39;color:#fff;font:800 {round(size * .36)}px \'Inter Tight\'">'
+                f'{re.sub(r"[^A-Za-z0-9]", "", name)[:2]}</div>')
+    lab = f'<div class="tn">{name}</div>' if label else ''
+    return f'<div id="{tid}" class="ti" style="left:{x}px;top:{y}px;width:{w}px">{face}{lab}</div>'
+
+
+def screen_text(text, names=()):
+    """storyboard words drawn in a graphic: British spelling, sentence case ("In-Game Chat (Roblox)" -> "In-game chat
+    (Roblox)"); names, acronyms and anything in brackets keep their capitals"""
+    out, keep = [], {n.lower() for n in names} | PROPER
+    for k, w in enumerate(re.split(r'(\s+)', british(text))):
+        core = re.sub(r"[^\w'-]", '', w)
+        if not core or w.startswith('(') or core.isupper() and len(core) > 1 or core.lower() in keep:
+            out.append(w)
+        else:
+            out.append(w.lower())
+    t = ''.join(out)
+    return t[:1].upper() + t[1:]
+
+
+def chip(cid, text, color, x=None, y=0, icon=''):
+    pos = f'left:{x}px' if x is not None else 'left:50%;margin-left:0;transform:translateX(-50%)'
+    return (f'<div id="{cid}" class="chip" style="{pos};top:{y}px;color:{color}">{SVG.get(icon, "")}<span>{text}</span></div>')
+
+
+def pop(sel, t, dur=.34, frm='scale:.4', ease='back.out(2)'):
+    return f"tl.fromTo('{sel}',{{autoAlpha:0,{frm}}},{{autoAlpha:1,scale:1,duration:{dur},ease:'{ease}',immediateRender:false}},{t:.3f});"
+
+
+def show(gid, a, b):
+    """a graphic's panel in (fade + rise) at a, out at b"""
+    return ([f"tl.fromTo('#{gid} .gi',{{autoAlpha:0,y:34,scale:.97}},{{autoAlpha:1,y:0,scale:1,duration:.45,ease:'power3.out',immediateRender:false}},{a:.3f});"]
+            + hide(f'#{gid} .gi', b, at_cut(b), .25))
+
+
+def g_stamp(g):
+    gid, html, tw = g['id'], [], []
+    apps = g.get('apps', [])[:6]
+    pw, ph = 250, 430
+    px = (GFX_W - pw) // 2
+    cells, ts = [], 58
+    for k in range(12):
+        cx, cy = 22 + (k % 3) * (ts + 16), 64 + (k // 3) * (ts + 18)
+        if k < len(apps):
+            cells.append(tile(f'{gid}-a{k}', apps[k], g['art'].get(apps[k]), ts, False, cx, cy, wide=False)
+                         + (f'<div id="{gid}-k{k}" class="lk" style="left:{cx + ts - 20}px;top:{cy - 10}px">{SVG["lock"]}</div>' if g.get('locks') else ''))
+        else:
+            cells.append(f'<div class="ph0" style="left:{cx}px;top:{cy}px;width:{ts}px;height:{ts}px"></div>')
+    game = (f'<div id="{gid}-gm" class="gm" style="left:{(pw - 120) // 2}px;top:{ph - 170}px">{SVG["gamepad"].replace("28", "120")}</div>'
+            if g.get('then', {}).get('icon') == 'gamepad' else '')
+    html.append(f'<div id="{gid}-ph" class="phone" style="left:{px}px;top:12px;width:{pw}px;height:{ph}px"><div class="notch"></div>{"".join(cells)}{game}</div>')
+
+    def banner(bid, b, icon=''):
+        col = TONE.get(b.get('tone'), RED)
+        small = f'<div class="bs">{b["small"]}</div>' if b.get('small') else ''
+        ic = SVG['gamepad'].replace('28', '58') if icon == 'gamepad' else ''
+        return (f'<div id="{bid}" class="bn" style="left:50%;top:150px;background:{col}">{small}'
+                f'<div class="bm">{ic}<span>{b["text"]}</span></div></div>')
+    html.append(banner(f'{gid}-b1', g['banner']))
+    if g.get('then'):
+        html.append(banner(f'{gid}-b2', g['then']['banner'], g['then'].get('icon')))
+    hidden = [f'#{gid}-b1'] + ([f'#{gid}-b2', f'#{gid}-gm'] if g.get('then') else []) + [f'#{gid}-k{k}' for k in range(len(apps)) if g.get('locks')]
+    tw.append(f"gsap.set({hidden!r},{{autoAlpha:0}});")
+    tw.append(f"gsap.set(['#{gid}-b1','#{gid}-b2'],{{xPercent:-50,rotation:-7,transformPerspective:900}});")
+    tw += [pop(f'#{gid}-a{k}', g['a'] + .15 + .09 * k) for k in range(len(apps))]
+    t = g['banner']['t']
+    tw += [f"tl.fromTo('#{gid}-b1',{{autoAlpha:0,scale:2.3,rotation:-18}},{{autoAlpha:1,scale:1,rotation:-7,duration:.3,ease:'back.out(1.5)',immediateRender:false}},{t - .04:.3f});",
+           f"tl.fromTo('#{gid}-ph',{{x:-10}},{{x:0,duration:.4,ease:'elastic.out(1,0.3)',immediateRender:false}},{t + .2:.3f});"]
+    tw += [pop(f'#{gid}-k{k}', t + .14 + .07 * k, .26) for k in range(len(apps)) if g.get('locks')]
+    tw += show(gid, g['a'], g['b'])
+    if g.get('then'):   # the banner flips: the phone comes back as it was, then turns over on the words
+        th = g['then']
+        tw += show(gid, th['a'], th['b'])
+        f = th['t'] - .06
+        tw += [f"tl.to('#{gid}-b1',{{rotationX:90,duration:.16,ease:'power2.in'}},{f:.3f});",
+               f"tl.set('#{gid}-b1',{{autoAlpha:0}},{f + .16:.3f});",
+               f"tl.fromTo('#{gid}-b2',{{autoAlpha:1,rotationX:-90}},{{autoAlpha:1,rotationX:0,duration:.26,ease:'back.out(1.6)',immediateRender:false}},{f + .16:.3f});",
+               f"tl.to('#{gid}-ph',{{borderColor:'{GREEN}',boxShadow:'0 0 60px rgba(34,197,94,.55)',duration:.3}},{f + .16:.3f});",
+               f"tl.to('#{gid}-ph .ti, #{gid}-ph .lk',{{autoAlpha:.22,duration:.25}},{f + .1:.3f});"]
+        if th.get('icon') == 'gamepad':
+            tw.append(pop(f'#{gid}-gm', f + .3, .4))
+    return html, tw, ph + 30
+
+
+def g_split(g):
+    gid, html, tw = g['id'], [], []
+    sides = g['sides'][:2]
+    pw, gap, top, H = 440, 60, 0, 0
+    cols = [TONE.get(sd.get('tone'), RED if n == 0 else GOLD) for n, sd in enumerate(sides)]        # badge colour
+    labs = [TONE.get(sd.get('label_tone'), cols[n]) for n, sd in enumerate(sides)]                 # chip colour
+    for n, sd in enumerate(sides):
+        x, col = n * (pw + gap), cols[n]
+        items = sd['items'][:6]
+        size = 112 if len(items) <= 3 else 92
+        per = min(3, max(1, len(items)))
+        rows = -(-len(items) // per) if items else 0
+        inner = [chip(f'{gid}-c{n}', sd['label'] or ('A' if n == 0 else 'B'), labs[n], 24, 22)]
+        rows_ = [list(range(r * per, min(len(items), (r + 1) * per))) for r in range(rows)]
+        while size > 64 and any(sum(tile_w(g['art'].get(items[k]), size) for k in row) + 26 * (len(row) - 1) > pw - 40 for row in rows_):
+            size -= 8   # wide logos: shrink the row until it fits the panel
+        for r, row in enumerate(rows_):
+            ws = [tile_w(g['art'].get(items[k]), size) for k in row]
+            ix, iy = (pw - sum(ws) - 26 * (len(row) - 1)) // 2, 92 + r * (size + 52)
+            for k, w in zip(row, ws):
+                inner.append(tile(f'{gid}-i{n}-{k}', items[k], g['art'].get(items[k]), size, True, ix, iy))
+                if n == 0 and col == RED:
+                    inner.append(f'<div id="{gid}-k{n}-{k}" class="lk" style="left:{ix + w - 22}px;top:{iy - 10}px">{SVG["lock"]}</div>')
+                ix += w + 26
+        by = 92 + rows * (size + 52) + 12
+        if sd.get('badge'):
+            if col == RED:
+                inner.append(f'<div id="{gid}-bd{n}" class="stp" style="top:{by}px;color:{RED}">{sd["badge"]}</div>')
+            else:
+                inner.append(f'<div id="{gid}-bd{n}" class="wb" style="top:{by + 6}px;color:{col}">{SVG["warn"]}<span>{sd["badge"]}</span></div>')
+        h = by + 92
+        H = max(H, h)
+        html.append(f'<div id="{gid}-p{n}" class="pn" style="left:{x}px;top:{top}px;width:{pw}px;height:{h}px">{"".join(inner)}</div>')
+    if len(sides) == 2:
+        html.append(f'<div id="{gid}-vs" class="vs" style="left:{pw + gap // 2 - 48}px;top:{H // 2 - 48}px">VS</div>')
+    hid = [f'#{gid}-p{n}' for n in range(len(sides))] + [f'#{gid}-i{n}-{k}' for n, sd in enumerate(sides) for k in range(len(sd['items'][:6]))]
+    hid += [f'#{gid}-k0-{k}' for k in range(len(sides[0]['items'][:6]))] if sides and cols[0] == RED else []
+    hid += [f'#{gid}-bd{n}' for n, sd in enumerate(sides) if sd.get('badge')] + ([f'#{gid}-vs'] if len(sides) == 2 else [])
+    tw.append(f"gsap.set({hid!r},{{autoAlpha:0}});")
+    for n, sd in enumerate(sides):
+        tw.append(f"tl.fromTo('#{gid}-p{n}',{{autoAlpha:0,y:26}},{{autoAlpha:1,y:0,duration:.4,ease:'power3.out',immediateRender:false}},{sd['t']:.3f});")
+        tw += [pop(f'#{gid}-i{n}-{k}', t - .05) for k, t in enumerate(sd['beats'][:6])]
+        if sd.get('badge'):
+            col, bt = cols[n], sd['badge_t']
+            if col == RED:
+                tw.append(f"tl.fromTo('#{gid}-bd{n}',{{autoAlpha:0,scale:1.9,rotation:-12}},{{autoAlpha:1,scale:1,rotation:-4,duration:.28,ease:'back.out(1.4)',immediateRender:false}},{bt:.3f});")
+                tw += [pop(f'#{gid}-k{n}-{k}', bt + .12 + .06 * k, .24) for k in range(len(sd['items'][:6])) if n == 0]
+            else:
+                tw.append(pop(f'#{gid}-bd{n}', bt, .3, 'scale:.6'))
+                if sd.get('blink'):
+                    reps = max(1, int((g['b'] - bt - .5) / .45))
+                    reps -= reps % 2 == 0   # an odd repeat count ends on the lit state
+                    tw.append(f"tl.fromTo('#{gid}-bd{n}',{{autoAlpha:1}},{{autoAlpha:.3,duration:.45,repeat:{reps},yoyo:true,ease:'sine.inOut',immediateRender:false}},{bt + .4:.3f});")
+    if len(sides) == 2:
+        tw.append(pop(f'#{gid}-vs', g['vs_t'] + .12, .36, 'scale:0'))
+    tw += [f"tl.set('#{gid} .gi',{{autoAlpha:1}},{g['a']:.3f});"] + hide(f'#{gid} .gi', g['b'], at_cut(g['b']), .25)
+    return html, tw, H
+
+
+def g_flow(g):
+    gid, html, tw = g['id'], [], []
+    steps = g['steps'][:6]
+    rh, gap, top0 = 70, 24, 84
+    H = top0 + len(steps) * rh + (len(steps) - 1) * gap + 26
+    inner = [chip(f'{gid}-t', g.get('title') or 'HOW IT HAPPENS', GOLD, None, 22, 'warn')]
+    for k, st in enumerate(steps):
+        y = top0 + k * (rh + gap)
+        text = screen_text(st['text'])
+        size = int(min(30, 690 / max(1e-6, text_width(text, 1, 'Inter-600-normal'))))
+        inner.append(f'<div id="{gid}-r{k}" class="fr" style="top:{y}px"><div id="{gid}-n{k}" class="fn">{k + 1}</div>'
+                     f'<div class="ft" style="font-size:{size}px">{text}</div></div>')
+        if k:
+            inner.append(f'<div class="fa" style="top:{y - gap + 2}px">'
+                         f'<svg width="20" height="{gap - 4}" viewBox="0 0 20 20"><path d="M10 2v14M4 11l6 6 6-6" fill="none" stroke="rgba(255,255,255,.45)" '
+                         f'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>')
+    html.append(f'<div class="pn" style="left:0;top:0;width:{GFX_W}px;height:{H}px">{"".join(inner)}</div>')
+    tw.append(f"gsap.set('#{gid} .fr',{{autoAlpha:.32}});")
+    for k, st in enumerate(steps):
+        col = RED if st.get('danger') else GOLD
+        t = st['t'] - .06
+        tw += [f"tl.to('#{gid}-r{k}',{{autoAlpha:1,borderColor:'{col}',backgroundColor:'rgba(255,255,255,.07)',duration:.2}},{t:.3f});",
+               f"tl.to('#{gid}-n{k}',{{backgroundColor:'{col}',color:'#111',duration:.2}},{t:.3f});",
+               f"tl.fromTo('#{gid}-r{k}',{{scale:1.045}},{{scale:1,duration:.35,ease:'power2.out',immediateRender:false}},{t:.3f});"]
+        if k:
+            tw += [f"tl.to('#{gid}-r{k - 1}',{{borderColor:'rgba(255,255,255,.18)',duration:.25}},{t:.3f});",
+                   f"tl.to('#{gid}-n{k - 1}',{{backgroundColor:'#ffffff',color:'#111',duration:.25}},{t:.3f});"]
+    tw += show(gid, g['a'], g['b'])
+    return html, tw, H
+
+
+def g_stat(g):
+    gid, html, tw = g['id'], [], []
+    val = g['value']
+    size = int(min(176, 860 / max(1e-6, text_width(val, 1, 'InterTight-900-normal'))))
+    digits = []
+    for k, ch in enumerate(val):
+        if ch.isdigit():
+            col = ''.join(f'<span>{d % 10}</span>' for d in range(20))
+            digits.append(f'<span class="dg"><span id="{gid}-d{k}" class="col">{col}</span></span>')
+        else:
+            digits.append(f'<span class="dc">{ch}</span>')
+    y = 78
+    inner = [chip(f'{gid}-s', (g.get('source') or 'STUDY').upper(), GOLD, None, 22)] if g.get('source') else []
+    inner.append(f'<div class="num" style="top:{y}px;font-size:{size}px;height:{size}px">{"".join(digits)}</div>')
+    y += round(size * 1.04)
+    lab = screen_text(g.get('label_text', '')) if g.get('label_text') else ''
+    if lab:
+        ls = int(min(62, 860 / max(1e-6, text_width(lab, 1, 'InterTight-800-normal'))))
+        inner.append(f'<div id="{gid}-l" class="sl" style="top:{y}px;font-size:{ls}px">{lab}</div>')
+        y += round(ls * 1.2)
+    if g.get('note'):
+        inner.append(f'<div id="{gid}-n" class="sn" style="top:{y + 6}px">{screen_text(g["note"])}</div>')
+        y += 6 + 2 * 38
+    H = y + 30
+    html.append(f'<div class="pn" style="left:0;top:0;width:{GFX_W}px;height:{H}px">{"".join(inner)}</div>')
+    t, a = g['t'], g['a']
+    start = max(a + .3, t - 1.1)
+    tw.append(f"gsap.set([{', '.join(repr(f'#{gid}-{x}') for x in ('l', 'n') if (x == 'l' and lab) or (x == 'n' and g.get('note')))}],{{autoAlpha:0}});")
+    for k, ch in enumerate(val):   # every digit rolls a full turn and lands on its own value as the number is said
+        if ch.isdigit():
+            tw.append(f"tl.fromTo('#{gid}-d{k}',{{yPercent:0}},{{yPercent:{-(10 + int(ch)) * 5},duration:{t + .12 - start + .04 * k:.3f},"
+                      f"ease:'power3.out',immediateRender:false}},{start:.3f});")
+    if lab:
+        tw.append(f"tl.fromTo('#{gid}-l',{{autoAlpha:0,y:18}},{{autoAlpha:1,y:0,duration:.35,ease:'power2.out',immediateRender:false}},{t + .2:.3f});")
+    if g.get('note'):
+        tw.append(f"tl.fromTo('#{gid}-n',{{autoAlpha:0,y:12}},{{autoAlpha:1,y:0,duration:.35,ease:'power2.out',immediateRender:false}},{t + .55:.3f});")
+    tw += show(gid, a, g['b'])
+    return html, tw, H
+
+
+TOPO = None
+
+
+def countries_geo():
+    """{name: [polygon: [ring: [(lon, lat)]]]} from the bundled world map (Natural Earth 1:110m via world-atlas)"""
+    global TOPO
+    if TOPO is None:
+        topo, TOPO = load('assets/map/countries-110m.json', {}), {}
+        if not topo:
+            return TOPO
+        (sx, sy), (tx, ty) = topo['transform']['scale'], topo['transform']['translate']
+        arcs = []
+        for arc in topo['arcs']:
+            x = y = 0
+            pts = []
+            for dx, dy in arc:
+                x += dx; y += dy
+                pts.append((x * sx + tx, y * sy + ty))
+            arcs.append(pts)
+
+        def ring(idx):
+            pts = []
+            for i in idx:
+                a = arcs[i] if i >= 0 else arcs[~i][::-1]
+                pts.extend(a if not pts else a[1:])
+            return pts
+        for geo in next(iter(topo['objects'].values()))['geometries']:
+            polys = geo.get('arcs', []) if geo['type'] == 'MultiPolygon' else [geo.get('arcs', [])] if geo['type'] == 'Polygon' else []
+            TOPO[geo['properties']['name']] = [[ring(r) for r in poly] for poly in polys]
+    return TOPO
+
+
+def g_map(g):
+    gid, html, tw = g['id'], [], []
+    geo = countries_geo()
+    places = [p for p in g.get('places', []) if p in geo]
+    H, mw, mh, mx, my = 470, 580, 422, 24, 24
+    if not places:
+        MISSING.append(f"{gid} map: none of {g.get('places')} is in the world map")
+        return [], [], 0
+    pts = [p for name in places for poly in geo[name] for p in poly[0]]
+    lon0, lon1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    lat0, lat1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    k = math.cos(math.radians((lat0 + lat1) / 2))
+    cx, cy = (lon0 + lon1) / 2, (lat0 + lat1) / 2
+    span = max((lon1 - lon0) * k * 1.3 / mw, (lat1 - lat0) * 1.3 / mh)   # degrees per pixel, 15% air each side
+    def xy(lon, lat):
+        return mx + mw / 2 + (lon - cx) * k / span, my + mh / 2 - (lat - cy) / span
+    paths, ids = [], {}
+    for name, polys in geo.items():
+        d = []
+        for poly in polys:
+            for r in poly:
+                if any(abs(a[0] - b[0]) > 180 for a, b in zip(r, r[1:])):
+                    continue   # rings across the date line (Fiji, Russia's far east) are never in a regional map
+                q = [xy(*p) for p in r]
+                if max(x for x, _ in q) < mx - 40 or min(x for x, _ in q) > mx + mw + 40 or max(y for _, y in q) < my - 40 or min(y for _, y in q) > my + mh + 40:
+                    continue
+                d.append('M' + 'L'.join(f'{x:.1f},{y:.1f}' for x, y in q) + 'Z')
+        if d:
+            pid = f'{gid}-m{len(paths)}'
+            if name in places:
+                ids[name] = pid
+            paths.append(f'<path id="{pid}" d="{"".join(d)}" class="{"mpl" if name in places else "mc"}"/>')
+    # the place labels, the target tiles, and the lines between them
+    inner, lines, cen = [], [], {}
+    for n, name in enumerate(places):
+        ring_ = max((poly[0] for poly in geo[name]), key=len)
+        q = [xy(*p) for p in ring_]
+        cen[name] = (sum(x for x, _ in q) / len(q), sum(y for _, y in q) / len(q))
+        lx, ly = min(x for x, _ in q), min(y for _, y in q)
+        inner.append(chip(f'{gid}-pl{n}', name.upper(), GOLD, round(max(mx + 8, min(lx, mx + mw - 200))), round(max(my + 8, min(ly - 46, my + mh - 50)))))
+    targets = g.get('targets', [])[:3]
+    ts = 96
+    col_x = mx + mw + 50
+    for n, tg in enumerate(targets):
+        ty = round(H / 2 - (len(targets) * (ts + 40) - 40) / 2 + n * (ts + 40))
+        tx = col_x + (GFX_W - col_x - min(tile_w(g['art'].get(tg), ts), GFX_W - col_x - 24) - 24) // 2
+        inner.append(tile(f'{gid}-tg{n}', tg, g['art'].get(tg), ts, True, tx, ty))
+        ex, ey = tx - 10, ty + ts / 2
+        for m, name in enumerate(places):
+            sx, sy = cen[name]
+            c1x, c1y = (sx + ex) / 2, min(sy, ey) - 90
+            lines.append(f'<path id="{gid}-ln{n}-{m}" d="M{sx:.1f},{sy:.1f} Q{c1x:.1f},{c1y:.1f} {ex:.1f},{ey:.1f}" pathLength="1" class="mln"/>')
+    svg = (f'<svg class="msv" width="{GFX_W}" height="{H}" viewBox="0 0 {GFX_W} {H}"><defs><clipPath id="{gid}-clip">'
+           f'<rect x="{mx}" y="{my}" width="{mw}" height="{mh}" rx="20"/></clipPath></defs>'
+           f'<g clip-path="url(#{gid}-clip)"><rect x="{mx}" y="{my}" width="{mw}" height="{mh}" fill="#11151b"/>{"".join(paths)}</g>{"".join(lines)}</svg>')
+    html.append(f'<div class="pn mp" style="left:0;top:0;width:{GFX_W}px;height:{H}px">{svg}{"".join(inner)}</div>')
+    hid = [f'#{gid}-pl{n}' for n in range(len(places))] + [f'#{gid}-tg{n}' for n in range(len(targets))]
+    tw.append(f"gsap.set({hid!r},{{autoAlpha:0}});")
+    tw.append(f"gsap.set('#{gid} .mln',{{strokeDashoffset:1}});")
+    for n, (name, t) in enumerate(zip(places, g.get('place_t', []))):
+        tw += [f"tl.to('#{ids[name]}',{{fill:'{GOLD}',duration:.45,ease:'power2.out'}},{t - .05:.3f});", pop(f'#{gid}-pl{n}', t, .3, 'scale:.7')]
+    for n, t in enumerate(g.get('target_t', [])[:3]):
+        tw.append(pop(f'#{gid}-tg{n}', t - .08))
+        tw += [f"tl.to('#{gid}-ln{n}-{m}',{{strokeDashoffset:0,duration:.6,ease:'power2.inOut'}},{t:.3f});" for m in range(len(places))]
+    tw += show(gid, g['a'], g['b'])
+    return html, tw, H
+
+
+def g_custom(g):
+    """a graphic no built-in kind draws: a transparent insert a sub-agent rendered (references/overlays.md)"""
+    gid, f = g['id'], g.get('insert') or f"assets/graphics/{g['id']}.webm"
+    if not os.path.isfile(f):
+        MISSING.append(f"{gid} ({g['scene']}): {f} not built yet: \"{g['visual'][:90]}\"")
+        return [], [], 0
+    w, h = img_size(f)
+    s = min(1.0, GFX_W / w, 560 / h)
+    W, H = round(w * s), round(h * s)
+    html = [f'<video id="{gid}-v" src="{f}" muted playsinline data-start="{g["a"]:.3f}" data-duration="{g["b"] - g["a"]:.3f}" '
+            f'data-track-index="5" style="position:absolute;left:{(GFX_W - W) // 2}px;top:0;width:{W}px;height:{H}px"></video>']
+    return html, show(gid, g['a'], g['b']), H
+
+
+def graphics():
+    html, tw = [], []
+    for g in GFX:
+        g.setdefault('art', {})
+        maker = {'stamp': g_stamp, 'split': g_split, 'flow': g_flow, 'stat': g_stat, 'map': g_map}.get(g['kind'], g_custom)
+        h, t, H = maker(g)
+        if not h:
+            continue
+        end = g['then']['b'] if g.get('then') else g['b']
+        head = min(head_at(seg_at(x), x) for x in [g['a'] + i * .25 for i in range(int((end - g['a']) / .25) + 1)])
+        room = head - 30 - GFX_TOP
+        sc = min(1.0, room / H) if H else 1.0
+        if sc < .62:
+            GFX_TIGHT.append(f"{g['id']} {g['kind']} {g['a']:.2f}-{end:.2f}: head top y {head:.0f}, scaled to {sc:.2f}: frame those shots wider")
+        html.append(f'<div id="{g["id"]}" class="gfx" style="left:{GFX_X}px;top:{GFX_TOP}px;width:{GFX_W}px;height:{H}px;transform:scale({max(sc, .5):.3f})">'
+                    f'<div class="gi">{"".join(h)}</div></div>')
+        tw += [f"gsap.set('#{g['id']} .gi',{{autoAlpha:0}});"] + t
+    return html, tw
 
 
 # ------------------------------------------------------------------ cool girl extras: handwritten punch word, sparkles
@@ -569,7 +1085,7 @@ def script_behind_head(sid, a, b, text):
     k, xh, cap = script_k()
     hd = min(head_at(sid, a), head_at(sid, min(b, a + .6)))
     fit = SERIF_W / text_width(text, 1, SCRIPT_FONT, 0, .02)
-    clear = (hd - caps_top(sid) - CAP_LH - 24) / (1.05 * cap - .2 * xh)
+    clear = (hd - top_limit(sid)) / (1.05 * cap - .2 * xh)
     size = int(min(200, fit, clear))
     return round(hd + (.2 * xh - k) * size), size
 
@@ -651,7 +1167,7 @@ def core():
         sid = WORDS[idx[0]]['seg']
         a = max(t - .04, T[sid] + .02)
         win = window_of(a)
-        if win and win['kind'] == 'split':   # the split screen's own labels say these words
+        if win and win['kind'] == 'split' or gfx_at(a, a + .6):   # the split's labels / a graphic say these words
             continue
         nxt = PUNCHES[k + 1][1] - .04 if k + 1 < len(PUNCHES) else DUR + 1   # the last word holds to the end
         b = min(END[sid], nxt - .02, a + 1.9) if END[sid] < DUR - .01 else min(nxt - .02, DUR)
@@ -716,6 +1232,18 @@ def sfx_list():
         if all(abs(t - u) > .8 for u in used):
             out.append(('whoosh-short', t, .2)); used.append(t)
     out += [('pop', c['bottom_t'], .14) for c in CUTAWAYS if c['kind'] == 'split']
+    for g in GFX:   # a graphic comes in on a soft whoosh; stamps, the VS disc and a landing number pop; steps click
+        for t in [g['a']] + ([g['then']['a']] if g.get('then') else []):
+            if all(abs(t - u) > .8 for u in used):
+                out.append(('whoosh-short', t, .16)); used.append(t)
+        if g['kind'] == 'stamp':
+            out += [('pop', g['banner']['t'], .14)] + ([('pop', g['then']['t'], .14)] if g.get('then') else [])
+        elif g['kind'] == 'split' and len(g.get('sides', [])) == 2:
+            out.append(('pop', g['vs_t'] + .12, .12))
+        elif g['kind'] == 'flow':
+            out += [('click-soft', st['t'], .18) for st in g['steps']]
+        elif g['kind'] == 'stat':
+            out.append(('pop', g['t'] + .1, .14))
     out += [('sparkle', punch_t(t) + .3, .12) for t in sorted(SCRIPT_PUNCH) if punch_t(t) is not None]   # under the handwriting
     if IMPACT and punch_t(IMPACT) is not None:
         out.append(('impact-bass-1', punch_t(IMPACT) - .03, .16))
@@ -792,6 +1320,64 @@ html,body{{width:1080px;height:1920px;overflow:hidden;background:#000}}
   color:{CREAM};font:500 24px Montserrat;letter-spacing:.28em;white-space:nowrap;transform-origin:0 50%}}
 #endc{{position:absolute;inset:0;overflow:hidden;background:#0d1015}}
 #endc .pw{{z-index:3}}
+
+/* storyboard graphics: dark panels in the wall space above the head (VISUALS drawn, every element on its word) */
+.gfx{{position:absolute;z-index:12;transform-origin:50% 0}}
+.gfx .gi{{position:absolute;inset:0}}
+.pn{{position:absolute;border-radius:30px;background:rgba(13,16,21,.9);border:1.5px solid rgba(255,255,255,.1);
+  box-shadow:0 30px 80px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.3)}}
+.chip{{position:absolute;display:inline-flex;align-items:center;gap:10px;padding:9px 18px 8px;border-radius:999px;font:600 20px Montserrat;
+  letter-spacing:.26em;white-space:nowrap;border:1.5px solid currentColor;background:rgba(0,0,0,.25)}}
+.chip svg{{width:22px;height:22px}}
+.ti{{position:absolute;display:flex;flex-direction:column;align-items:center;gap:10px}}
+.tl{{display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;box-shadow:0 8px 22px rgba(0,0,0,.35)}}
+.tl img{{display:block}}
+.tn{{font:600 21px Inter;color:#d6dbe3;white-space:nowrap}}
+.lk{{position:absolute;width:30px;height:30px;border-radius:50%;background:#EF4444;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 0 0 3px #0d1015}}
+.phone{{position:absolute;border-radius:44px;background:linear-gradient(180deg,#14171d,#0b0d11);border:3px solid #2c313a;
+  box-shadow:0 30px 80px rgba(0,0,0,.55)}}
+.phone .notch{{position:absolute;left:50%;top:14px;width:84px;height:24px;margin-left:-42px;border-radius:12px;background:#000}}
+.phone .ph0{{position:absolute;border-radius:14px;background:rgba(255,255,255,.07)}}
+.phone .gm{{position:absolute;color:#22C55E;filter:drop-shadow(0 0 22px rgba(34,197,94,.7))}}
+.bn{{position:absolute;padding:12px 34px 16px;border-radius:14px;text-align:center;color:#fff;white-space:nowrap;
+  box-shadow:0 18px 40px rgba(0,0,0,.45);transform-origin:50% 50%}}
+.bn .bs{{font:600 19px Montserrat;letter-spacing:.32em;opacity:.92;margin-bottom:4px}}
+.bn .bm{{display:flex;align-items:center;gap:16px;font:900 62px 'Inter Tight';letter-spacing:-.01em;line-height:1}}
+.vs{{position:absolute;width:96px;height:96px;border-radius:50%;background:#F6D64A;color:#111;display:flex;align-items:center;
+  justify-content:center;font:900 38px 'Inter Tight';box-shadow:0 0 0 6px rgba(13,16,21,.9),0 12px 30px rgba(0,0,0,.4);z-index:2}}
+.stp{{position:absolute;left:50%;margin-left:-160px;width:320px;text-align:center;padding:10px 0 12px;border:4px solid currentColor;
+  border-radius:14px;font:900 40px 'Inter Tight';line-height:1;letter-spacing:.01em}}
+.wb{{position:absolute;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;gap:10px;padding:12px 20px;border-radius:999px;
+  border:2px solid currentColor;background:rgba(246,214,74,.12);font:800 24px 'Inter Tight';letter-spacing:.06em;white-space:nowrap}}
+.wb svg{{width:26px;height:26px}}
+.fr{{position:absolute;left:60px;width:820px;height:70px;border-radius:18px;border:2px solid rgba(255,255,255,.18);background:rgba(255,255,255,.04);
+  display:flex;align-items:center;gap:20px;padding:0 24px;transform-origin:50% 50%}}
+.fn{{width:42px;height:42px;border-radius:50%;background:#ffffff;color:#111;font:800 22px 'Inter Tight';display:flex;align-items:center;
+  justify-content:center;flex:none}}
+.ft{{font-family:Inter;font-weight:600;color:#fff;white-space:nowrap}}
+.fa{{position:absolute;left:50%;margin-left:-10px}}
+.num{{position:absolute;left:0;right:0;text-align:center;font-family:'Inter Tight';font-weight:900;color:#F6D64A;line-height:1;
+  letter-spacing:-.02em;white-space:nowrap}}
+.num .dg{{display:inline-block;height:1em;overflow:hidden;vertical-align:top}}
+.num .dg .col{{display:block}}
+.num .dg .col span{{display:block;height:1em}}
+.num .dc{{display:inline-block;vertical-align:top}}
+.sl{{position:absolute;left:0;right:0;text-align:center;font-family:'Inter Tight';font-weight:800;color:#fff;line-height:1.1;white-space:nowrap}}
+.sn{{position:absolute;left:60px;right:60px;text-align:center;font:600 28px/1.35 Inter;color:#b8bfcb}}
+.mp{{overflow:hidden}}
+.msv{{position:absolute;left:0;top:0}}
+.msv .mc{{fill:#272c35;stroke:#3a404b;stroke-width:1}}
+.msv .mpl{{fill:#353b46;stroke:#4a515d;stroke-width:1}}
+.msv .mln{{fill:none;stroke:#F6D64A;stroke-width:3;stroke-linecap:round;stroke-dasharray:1}}
+.ctp{{position:absolute;left:50%;transform:translateX(-50%);padding:16px 56px 18px;border-radius:999px;background:#F6D64A;color:#111;
+  font:900 46px 'Inter Tight';white-space:nowrap;box-shadow:0 14px 40px rgba(246,214,74,.25)}}
+.tap{{position:absolute;left:50%;margin-left:-40px;width:80px;height:80px;border-radius:50%;border:4px solid rgba(255,255,255,.9)}}
+.ctn{{position:absolute;left:0;right:0;text-align:center;color:#fff;font-family:'Inter Tight';font-weight:900;line-height:1;letter-spacing:-.02em;
+  white-space:nowrap}}
+.ctt{{position:absolute;left:0;right:0;text-align:center;color:#b8bfcb;font:600 28px Montserrat;letter-spacing:.3em}}
+.plate .pi{{display:inline-block;vertical-align:-6px;margin-right:.55em}}
+.plate .pi svg{{display:block}}
 
 /* storyboard SUPER lines: lower-third plates under the chin, clear of the icon column */
 .lt{{position:absolute;left:0;right:0;top:1398px;z-index:12;text-align:center}}
@@ -954,7 +1540,8 @@ def build():
     c_html, c_tw = cutaways()
     p_html, p_tw = supers()
     e_html, e_tw = end_card()
-    tweens = grades() + s_tw + f_tw + c_tw + p_tw + e_tw
+    g_html, g_tw = graphics()
+    tweens = grades() + s_tw + f_tw + c_tw + p_tw + e_tw + g_tw
     PIECES[:] = cutout_pieces(back_html, tweens)
     nl = '\n'
     a0, d = (RANGE[0], min(RANGE[1], REEL_DUR) - RANGE[0]) if RANGE else (0.0, REEL_DUR)
@@ -989,6 +1576,7 @@ def build():
 {nl.join(f_html)}
 {nl.join(c_html)}
 {nl.join(front_html)}
+{nl.join(g_html)}
 {nl.join(caps_html)}
 {nl.join(p_html)}
 {nl.join(e_html)}
@@ -1012,6 +1600,7 @@ with open(OUT, 'w', encoding='utf-8', newline='\n') as _f:
 os.makedirs('work', exist_ok=True)
 with open('work/reel.json', 'w', encoding='utf-8') as _f:   # for scripts/render.py: length + the audio mix
     json.dump({'look': LOOK, 'aroll_dur': DUR, 'reel_dur': round(REEL_DUR, 4), 'frames': round(REEL_DUR * 30),
+               'storyboard_missing': MISSING,
                'sfx': [{'name': n, 't': round(t, 3), 'dur': round(min(SFX_LEN[n], REEL_DUR - t), 3), 'vol': round(v * SFX_GAIN, 3)}
                        for n, t, v in SFX]}, _f, indent=1)
 if not RANGE:   # for scripts/cutout.py: the pieces this page shows
@@ -1023,13 +1612,23 @@ if '--plan' in sys.argv:
         print(f"{g['sid']} {g['words'][0][0]:6.2f}-{g['end']:6.2f}  {' '.join(w for _, w in g['words'])}")
     print(('PUNCH (automatic picks, review them):' if not PUNCH else 'PUNCH:'))
     for idx, t, text, it in PUNCHES:
-        print(f"  ({t:.2f}, {norm(WORDS[idx[0]]['text'])!r}, {text!r}, {it}),   # {WORDS[idx[0]]['seg']}")
+        print(f"  ({t:.2f}, {' '.join(norm(WORDS[i]['text']) for i in idx)!r}, {text!r}, {it}),   # {WORDS[idx[0]]['seg']}")
     if L['fx'] == 'girl':
         print(f"SPARKLE {'(automatic)' if SPARKLE is None else ''}: {sparkle_picks()}   SCRIPT_PUNCH: {sorted(SCRIPT_PUNCH) or 'none'}")
     for c in CUTAWAYS:
         print(f"cutaway {c['id']:8s} {c['a']:6.2f}-{c['b']:6.2f}  " + (f"{c['w']}x{c['h']} at ({c['x']},{c['y']}) {c['image']}" if c['kind'] == 'card' else 'split'))
+    for g in GFX:
+        print(f"graphic  {g['id']:8s} {g['a']:6.2f}-{g['b']:6.2f}  {g['kind']}  {g['visual'][:70]}")
 print(f"wrote {OUT}  look {LOOK}  reel {REEL_DUR:.3f}s (a-roll {DUR:.3f}s)  {len(CUTS)} cuts  {len(PUNCHES)} punch words"
       + (f"  {len(CUTAWAYS)} cutaways  {len(SUPERS)} supers{'  end card' if ENDC else ''}" if PLAN else ''))
+if GFX:
+    print(f"graphics: {len(GFX)} from the storyboard's VISUALS (captions under the face while they own the top of the frame)")
+for _w in GFX_TIGHT:
+    print('TIGHT graphic (a high head): ' + _w)
+if MISSING and not RANGE:
+    print('STORYBOARD NOT ON SCREEN (render.py refuses until these are built):')
+    for _w in MISSING:
+        print('  ' + _w)
 if not RANGE and SMALL_WORDS:
     print('SMALL behind-head words (a high head in a close-up): pick a word on a wider shot, or set it in front:')
     for _w in SMALL_WORDS:

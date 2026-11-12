@@ -27,7 +27,9 @@ Per shot (times are the source clip's):
   6. a final "s" cut off: the line's last word ends in an s sound and a hiss starts just after the out-point, with
      only quiet between (the "p" of "shapes" closed, the cut fell there, its "s" came 0.1s later). The same for an
      opening "s" before an in-point. FAIL with the point to use.
-  7. notes: a cut point inside continuous sound (a word may be clipped: the nearest silence is printed) and words
+  7. the reel's first shot opening on more than OPEN_GAP s of silence before its first word: FAIL (a hook starts on
+     its first word; "hold_ok": true on that segment keeps a held look on purpose).
+  8. notes: a cut point inside continuous sound (a word may be clipped: the nearest silence is printed) and words
      heard inside the shot before the line's first / after its last word (a false start let in, or Whisper inventing
      a word at a cut).
 Then a DROPPED report: what is said in every stretch the EDL leaves out between shots of a clip (up to 20s each).
@@ -253,6 +255,15 @@ def clipped(missing, heard, side, cut):
     return out[::-1] if side == 'lead' else out
 
 
+OPEN_GAP = .45   # silence before the reel's first word that reads as a dead start
+
+
+def opening_gap(heard, cut):
+    """seconds between the reel's in-point and its first heard word. The first reel from a news storyboard opened on
+    1.2s of room tone before "Malaysia": the hook lost its first second."""
+    return round(max(0.0, heard[0][1] - cut), 3) if heard else 0.0
+
+
 def islands(db, hop=.02, thr=-45.0, min_gap=.08, t0=0.0):
     """speech stretches from an RMS envelope (dB per hop): above thr, silences shorter than min_gap bridged"""
     out, start, quiet = [], None, 0
@@ -474,6 +485,10 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
                 failed.add(side)
                 msgs.append(f"the in-point {cut:.2f} cuts the opening 's' sound of {word!r} (a hiss at {hs[0]:.2f}-{hs[1]:.2f}): "
                             f"start at {max(0, hs[0] - .03):.2f}")
+        gap = opening_gap(inside, seg['in']) if seg is edl[0] else 0.0
+        if gap > OPEN_GAP and not seg.get('hold_ok'):
+            msgs.append(f"the reel opens on {gap:.2f}s of silence before {inside[0][0]!r} (heard from {inside[0][1]:.2f}): a hook starts "
+                        f"on its first word, start at {max(0, inside[0][1] - .07):.2f} (or add \"hold_ok\": true for a held look on purpose)")
         misses = near_misses(words, [h[0] for h in inside], seg.get('heard_ok', ()))
         if misses:   # the last letter is where Whisper is least sure: medium.en must hear it the same way
             again = {norm(a) for a, _ in near_misses(words, [h[0] for h in ears.hear(x, seg['in'], seg['out'], 'medium.en')],

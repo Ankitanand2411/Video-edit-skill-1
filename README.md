@@ -14,7 +14,7 @@ Film your talking-head clips on your phone, drop them in a folder, type `/video-
    - **Bold:** kinetic words around you, the big ones behind your head.
    - **Cool girl:** a warm grade with a yellow serif italic, and your own reels orbiting around you.
    - **Cool dude:** a dark editorial grade with tiny spaced capitals and big serif words.
-6. Follows a storyboard if you give it one: each scene's picture appears as a full-quality cutaway while you talk, the on-screen supers become lower-third titles (a "lines → shapes → letters → words" progression lights up word by word), a split screen for "A vs. B", and an end card with the closing line.
+6. Follows a storyboard if you give it one, line by line: each scene's picture appears as a full-quality cutaway while you talk; the graphics its VISUALS describe are built and timed to your words (a phone stamped RESTRICTED that flips, a banned-vs-allowed split screen, a flowchart that lights up step by step, a number that rolls up, a map, a "Follow" closing frame), using the logos you drop in the folder; the on-screen supers become lower-third titles (a "lines → shapes → letters → words" progression lights up word by word); and the reel ends on the closing frame or the last line.
 7. Builds animated inserts in parallel with sub-agents: an app on screen behind you, your Instagram profile getting followed on your call to action, a file scrolling.
 8. Keeps everything inside the Instagram safe zone, renders without a lossy intermediate step, checks every cut frame by frame, and hands you a phone-ready copy.
 
@@ -102,7 +102,7 @@ Claude finds them, shows you which take it picked for each line, and sends you t
 ```
 /video-edit edit the clip in "~/Desktop/My reel" in cool guy style, the storyboard is in the same folder
 ```
-Put the raw clip(s) and the storyboard spreadsheet (.xlsx) in one folder. The storyboard needs one row per scene with a `SCENE` column, a `STORYBOARD` column holding `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and the scene's picture placed in that row (any size; it is never upscaled, so bigger pictures look better). Add an mp3 to the folder if you want a music bed under your voice. You get back the finished reel; the project folder is created next to your clips.
+Put the raw clip(s) and the storyboard spreadsheet (.xlsx) in one folder. The storyboard needs one row per scene with a `SCENE` column, a `STORYBOARD` column holding `VISUALS:`, `SUPER:` and `SCRIPT / VO:` blocks, and optionally the scene's picture placed in that row (any size; it is never upscaled, so bigger pictures look better). VISUALS that describe graphics ("Split-Screen Graphic: Left Side (Banned)... Right Side (Allowed)...", "Flowchart: A ➔ B ➔ C", "Stat Callout Card: "100,000 ..."", "Map Graphic: ...", "Closing Frame: Follow ...") are built as those graphics. Drop the logos they mention in the same folder, named after the brand ("roblox logo.jpg"). Add an mp3 to the folder if you want a music bed under your voice. You get back the finished reel; the project folder is created next to your clips.
 
 **Give notes on a version:**
 ```

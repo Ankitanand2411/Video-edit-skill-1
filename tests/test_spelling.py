@@ -88,5 +88,14 @@ class Matching(unittest.TestCase):
         self.assertEqual((lm, tm), ([], []))
 
 
+
+class Names(unittest.TestCase):
+    def test_mixed_case_names_survive(self):   # the under-16 reel's "TikTok" punch word came out "Tiktok"
+        for w in ('TikTok', 'TikTok,', 'YouTube', 'iPhone', 'MCMC', 'UNICEF', "Malaysia's"):
+            self.assertEqual(spelling.british(w), w)
+        self.assertEqual(spelling.british_text('TikTok and YouTube organize'), 'TikTok and YouTube organise')
+        self.assertEqual(spelling.british('Organization'), 'Organisation')
+        self.assertEqual(spelling.british('COLOR'), 'COLOUR')
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
