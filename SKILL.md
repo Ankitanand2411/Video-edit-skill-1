@@ -102,17 +102,26 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
    as "cloud"/"claws", "skill" as "scale"). No em dashes in on-screen text. A caption never shows a word its shot
    does not contain: when a line's first or last words are not heard, the cut clipped them. Fix the cut; never give
    such words hand-made times in words.json.
-4. British English in every word on screen (captions, punch words, supers you write, inserts): recognise, colour,
-   centre, travelled, organisation; -ise, never -ize. Whisper spells the American way whatever the accent; the scripts
-   convert what they write (transcript, words.json, the punch display text) and match words spelling-blind, so never
-   change a line to the American spelling to get past check_edl.py or align.py. Names and brands keep their own
-   spelling ("Center Parcs", "Pfizer"): when the conversion changes one, FIX in build.py puts it back. Vocabulary is
-   not spelling: "math", "mom" and "apartment" stay as said. The storyboard's own text is never changed.
+4. British English in every word on screen you write (captions of words the storyboard does not have, punch words,
+   inserts): recognise, colour, centre, travelled, organisation; -ise, never -ize. Whisper spells the American way
+   whatever the accent; the scripts convert what they write (transcript, words.json, the punch display text) and match
+   words spelling-blind, so never change a line to the American spelling to get past check_edl.py or align.py. Names
+   and brands keep their own spelling ("Center Parcs", "Pfizer"): when the conversion changes one, FIX in build.py
+   puts it back. Vocabulary is not spelling: "math", "mom" and "apartment" stay as said. The storyboard's own text is
+   never changed.
 5. Sound effects subtle (template `SFX_GAIN = 0.75` of the base volumes), never louder than the voice.
 6. Credit other creators on screen (@handle) whenever their reels appear. Real numbers on the user's own profile;
    anything else (commenters, chat history) is a generic placeholder, never a real person, never fabricated proof.
 7. Prove cuts from the final render, not from snapshots.
 8. Never delete the user's files. Originals are read, never modified.
+9. Storyboard mode: the storyboard is the source of truth for every word on screen, in every video. Captions take
+   each spoken word's spelling and capitals from its SCRIPT (build.py aligns them: "Deputy Police Chief", "100,000",
+   "Gaming platforms"; a word the script does not have shows as the EDL line writes it). SUPERs, labels, badges, steps,
+   numbers and the closing frame appear exactly as written: no forced CAPS, no lower-casing, no respelling. Only
+   emojis (drawn as icons) and em dashes (a comma) change. Every VISUALS line is built (picture card, graphic or
+   insert) and its effects with it (a flip, a blink, a glow, lines drawn on); the MOOD sets the pace of the cut and
+   the grade ("Vibrant": a touch more colour). build.py prints how many words follow the script and flags a PUNCH
+   whose text is not the script's.
 
 ## Workflow
 

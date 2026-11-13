@@ -188,8 +188,10 @@
 - Quick graphics check without HyperFrames: copy index.html to work/preview.html with `<base href="../">` and
   `<script>window.__timelines = {};</script>` in the head, serve the project folder, open it in a browser and call
   `window.__timelines.main.seek(t)`. Snapshots (`HF snapshot`) stay the proof.
-- Lower-case looks lowercased names ("tiktok", "mcmc", "unicef", "australia"): build.py keeps a capital on any word
-  written capitalised inside a sentence in the EDL lines or the storyboard script, and on every name a graphic shows.
+- Lower-case looks lowercased names ("tiktok", "mcmc", "unicef", "australia"). Without a storyboard, build.py keeps a
+  capital on any word written capitalised inside a sentence in the EDL lines; with one, every word follows the script
+  as written (the team wants the storyboard followed strictly: captions, capitals, supers, labels, every video).
+- Captions dropped digit grouping ("100000"): bare() keeps a comma or point between digits.
 
 ## Windows (same skill, different shell)
 - Claude Code on Windows runs commands in Git Bash when Git for Windows is installed, otherwise in PowerShell, and

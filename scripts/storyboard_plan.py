@@ -178,7 +178,7 @@ def plan_graphics(sb, words, scenes):
                 i, t = hit(g['banner']['text'] or 'restricted')
                 if not g['banner']['small']:   # "Under 16" from the scene's SUPER / script reads well above the banner
                     m = re.search(r'\b(under|over|aged?|below|above)\s+\d+\+?', sc.get('super', '') + ' ' + sc.get('script', ''), re.I)
-                    g['banner']['small'] = m.group(0).upper() if m else ''
+                    g['banner']['small'] = m.group(0) if m else ''
                 g['a'] = round(max(a0, lo) + .15 if k == 0 else (t - 1.4 if t else a0), 3)
                 g['banner']['t'] = round(t if t else g['a'] + 1.0, 3)
                 g['b'] = round(min(b0, sentence_end(words, i) + .6 if i is not None else g['a'] + 3.5), 3)
@@ -238,8 +238,8 @@ def plan_graphics(sb, words, scenes):
                 g['b'] = round(min(hi, sentence_end(words, li) + .8), 3)
                 m = re.search(r'\b(they|he|she|it|we|you) (?:do|did|does) (?:it|this|that) by\b', ' '.join(w['text'] for w in words
                               if g['a'] <= w['start'] <= g['b']), re.I)
-                g['title'] = g['title'] or (f"HOW {m.group(1).upper()} DO IT" if m and m.group(1).lower() in ('they', 'we', 'you')
-                                            else 'HOW IT HAPPENS')
+                g['title'] = g['title'] or (f"How {m.group(1).lower()} do it" if m and m.group(1).lower() in ('they', 'we', 'you')
+                                            else 'How it happens')   # from the speech ("They do it by...")
             elif g['kind'] == 'stat':
                 i, t = hit(g['value'], single=False)
                 if i is None:
@@ -358,7 +358,7 @@ def main():
         vis = ' '.join(sc['visuals'])
         split = re.search(r'split', vis, re.I) and re.search(r'\bvs\.?\b', sup, re.I)
         if split and img and k > 0 and sb['scenes'][k - 1]['images']:
-            labels = [p.strip(' .').upper() for p in re.split(r'\bvs\.?', sup, flags=re.I)]
+            labels = [p.strip(' .') for p in re.split(r'\bvs\.?', sup, flags=re.I)]
             hits = []
             for lab in labels:
                 key = stem(lab.split()[0])
@@ -416,7 +416,7 @@ def main():
                     sa = max(c for c in cut_t if c <= times[0] + .01)
                     sb_ = min((c for c in cut_t if c > times[-1]), default=b0)
                     supers.append({'id': f'steps{k + 1}', 'kind': 'steps', 'scene': sc['scene'], 'a': round(sa, 3), 'b': round(min(sb_, b0), 3),
-                                   'steps': [[round(t, 3), st.upper()] for t, st in zip(times, steps)]})
+                                   'steps': [[round(t, 3), st] for t, st in zip(times, steps)]})
                     continue
             # a plate goes up where its words are said ("POLICE WARNING" on "police chief warned"), else over the
             # scene's last ~3s; the last scene's plate (its closing frame is the end card) ends where the end card comes in
@@ -432,7 +432,7 @@ def main():
                 sa, sb_ = max(a0, end_b - 3.1), end_b
             near = [c for c in cut_t if abs(c - sa) < .3]
             supers.append({'id': f'plate{k + 1}', 'kind': 'plate', 'scene': sc['scene'], 'a': round(near[0] if near else sa, 3),
-                           'b': round(sb_, 3), 'text': sup.upper(), 'icon': icon, 'yellow_last': 2})
+                           'b': round(sb_, 3), 'text': sup, 'icon': icon, 'yellow_last': 2})   # as written
     for c in cutaways:   # a picture card covers the whole frame: never over a graphic
         for g in graphics:
             if c['a'] < (g['then']['b'] if g.get('then') else g['b']) and g['a'] < c['b']:

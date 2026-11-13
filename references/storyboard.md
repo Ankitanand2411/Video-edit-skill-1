@@ -58,10 +58,24 @@ one graphic; a "Transition Graphic:" line changes the graphic before it). Kinds,
 - Names in a graphic (TikTok, Instagram, Discord, Roblox...) get the bundled icon on its brand colour
   (`assets/icons`, Simple Icons, CC0) or the folder's logo / photo; a name with neither prints "no picture for": ask
   the user for its logo or leave the initials tile. Logos appear only where the storyboard names the platform.
-- Graphic text is the storyboard's, shown in British spelling and sentence case ("In-game chat (Roblox)",
-  "Radicalisation / exploitation"); names, acronyms and anything in brackets keep their capitals.
+- Every word a graphic shows is the storyboard's, exactly as written ("In-Game Chat (Roblox)", "Under 16 Ban",
+  "UNICEF Study · 2022", "for more education News"): case and spelling untouched. A label the storyboard does not
+  give comes from the speech ("How they do it" from "They do it by...").
 - LOOK at `PY storyboard_plan.py` output: every graphic's beat times, the coverage list, the unused folder pictures.
   Change a time or a text in storyboard_plan.json when a beat is on the wrong word; the build follows it.
+
+## On-screen text follows the storyboard (every video)
+The storyboard is the source of truth for every word on screen:
+- Captions: build.py aligns the spoken words to the SCRIPT (in order, spelling-blind) and shows each matched word as
+  the script writes it: capitals ("Sounds like", "Malaysia's former Deputy Police Chief", "MCMC"), spelling
+  ("radicalization" when the script says so), numbers ("100,000"). Words the script does not have show as the EDL line
+  writes them. The under-16 reel: 240 of 267 spoken words matched. A lower-case look no longer lowercases a storyboard
+  reel; an all-caps look (cool dude captions) stays all caps.
+- SUPERs, split labels, badges, banners, steps, stat labels, place names and the closing frame: exactly as written
+  (the plates drop the wide caps tracking when the SUPER is in mixed case). Emojis become icons, em dashes commas.
+- PUNCH words in storyboard mode show the script's form of their words; build.py flags one that does not.
+- MOOD: "Vibrant / bright" lifts saturation and brightness a touch, "moody / dark / serious" lowers them; its pace sets
+  the breath between sentences in the cut.
 
 ## What the plan decides (then LOOK at every picture and fix what does not fit)
 - **Scenes**: each scene's script is aligned to the spoken words (difflib over normalised tokens); a boundary goes on

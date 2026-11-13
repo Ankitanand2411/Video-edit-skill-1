@@ -74,6 +74,10 @@ GFX = [dict(g) for g in (PLAN or {}).get('graphics', [])]   # storyboard VISUALS
 GFX_WIN = [w for g in GFX for w in [(g['a'], g['b'])] + ([(g['then']['a'], g['then']['b'])] if g.get('then') else [])]
 CAPS_LOW = bool(GFX)   # the graphics own the wall space above the head: the running captions move under the face
 CHEST = {'wide': 1240, 'close': 1310}   # caption line under the chin (1080x1920), above the lower-third plates at 1398
+SB_DOC = load('storyboard.json') or {}
+STRICT = bool(PLAN) and any(sc.get('script') for sc in SB_DOC.get('scenes', []))
+# storyboard mode: the storyboard is the source of truth for every word on screen. Captions take each word's spelling
+# and capitals from its SCRIPT; supers, labels and graphic text appear exactly as written (no forced caps or lower case)
 
 LOOKS = {   # references/looks.md has the why of every value
     'dude': {'room': 'contrast(1.08) saturate(.92) brightness(.86) hue-rotate(-4deg)',      # room moody (storyboard "vibrant": a touch lifted)
@@ -98,6 +102,13 @@ LOOKS = {   # references/looks.md has the why of every value
                        'lh': .9, 'track': -.05, 'size': {'wide': 236, 'close': 220}, 'color': '#FFFFFF', 'case': 'lower', 'anim': 'pop', 'italic': False}},
 }
 L = LOOKS[LOOK]
+MOOD = (PLAN or {}).get('mood', '').lower()
+if re.search(r'vibrant|bright|energetic|colou?rful|upbeat', MOOD):   # the storyboard's MOOD sets the grade too
+    for _k in ('room', 'subject'):
+        L[_k] += ' saturate(1.08) brightness(1.03)'
+elif re.search(r'moody|dark|serious|sombre|somber|dramatic', MOOD):
+    for _k in ('room', 'subject'):
+        L[_k] += ' saturate(.94) brightness(.97)'
 CAP, PU = L['cap'], L['punch']
 CAP_LH = round(CAP['size'] * 1.25)
 SERIF_W = 960          # widest a punch word / caption line may get (35px safe sides + air)
@@ -235,6 +246,12 @@ def shown(text):
     return text.lower()
 
 
+def bare(t):
+    """a word without punctuation, its digit grouping kept: "100,000" stays, "TikTok," -> "TikTok" (the first news reel
+    captioned "100000")"""
+    return re.sub(r"[^\w'’,.-]|[,.](?!\d)|(?<!\d)[,.]", '', t)
+
+
 def load_words():
     out = []
     for w in load('words.json'):
@@ -284,6 +301,40 @@ def british(text):
     return SPELL.british_text(text) if SPELL else text
 
 
+def script_tokens():
+    """the storyboard SCRIPT word by word, as written ("Gaming", "100,000", "in-game", "Malaysia's")"""
+    out = []
+    for sc in SB_DOC.get('scenes', []):
+        for tok in sc.get('script', '').split():
+            core = re.match(r"^\W*(.*?)\W*$", tok).group(1)
+            if re.search(r'\w', core):
+                out.append(core)
+    return out
+
+
+def storyboard_forms():
+    """storyboard mode: every spoken word the SCRIPT has too is shown as the script writes it (aligned in order,
+    spelling-blind: "deputy police chief" said is "Deputy Police Chief" written, "radicalisation" is "radicalization");
+    words the script does not have are shown as the EDL line writes them. -> (matched, spoken)"""
+    import difflib
+    toks = script_tokens()
+    key = SPELL.key if SPELL else norm
+    hits = 0
+    for blk in difflib.SequenceMatcher(None, [key(w['text']) for w in WORDS], [key(t) for t in toks], autojunk=False).get_matching_blocks():
+        for k in range(blk.size):
+            w = WORDS[blk.a + k]
+            lead, _, trail = re.match(r"^(\W*)(.*?)(\W*)$", w['text']).groups()
+            w['shown'] = lead + toks[blk.b + k] + trail
+            hits += 1
+    return hits, len(WORDS)
+
+
+if STRICT:
+    for _w in WORDS:
+        _w['shown'] = _w['text']   # the EDL line's own case for words the script does not have
+    SB_TEXT = storyboard_forms()
+
+
 # the CONTENT settings that name a punch word by its display text follow it into British spelling
 SCRIPT_PUNCH = {british(t) for t in SCRIPT_PUNCH}
 SPARKLE = {british(t): d for t, d in SPARKLE.items()} if SPARKLE else SPARKLE
@@ -329,7 +380,7 @@ def auto_punch():
             k = WORDS.index(w)
             art = WORDS[k - 1] if k and WORDS[k - 1]['seg'] == sid and norm(WORDS[k - 1]['text']) in ('a', 'an', 'the') else None
             end = w['text'].rstrip()[-1:]
-            disp = re.sub(r"[^\w'’-]", '', w['shown']) + (end if end in '.?!' else '')
+            disp = bare(w['shown']) + (end if end in '.?!' else '')
             key = norm(w['text'])
             if art:
                 disp, key = f"{norm(art['text'])} {disp}", f"{norm(art['text'])} {key}"
@@ -348,7 +399,12 @@ def resolve_punch():
             sys.exit(f'PUNCH word not found: {key!r} near {hint}s')
         i = min(cands, key=lambda c: abs(WORDS[c]['start'] - hint))
         it = PU['italic'] if PU['italic'] is not None else it
-        text = british(text)
+        lead, mid, trail = re.match(r"^(\W*)(.*?)(\W*)$", text).groups()
+        said = [WORDS[i + k] for k in range(len(toks))]
+        if STRICT and len(mid.split()) == len(said) and all(same_word(a, b['text']) for a, b in zip(mid.split(), said)):
+            text = lead + ' '.join(bare(w['shown']) for w in said) + trail   # the words as the storyboard writes them
+        else:
+            text = british(text)
         found.append((list(range(i, i + len(toks))), WORDS[i]['start'], text if PU['case'] != 'upper' else text.upper(), it))
     return sorted(found, key=lambda p: p[1])
 
@@ -363,8 +419,8 @@ def punch_t(text):
 
 # ------------------------------------------------------------------ caption lines (balanced by measured width)
 def cap_text(t):
-    t = re.sub(r"[^\w'’-]", '', t)
-    return t.upper() if CAP['case'] == 'upper' else t   # lower-case looks: already cased by shown() (names kept)
+    t = bare(t)
+    return t.upper() if CAP['case'] == 'upper' else t   # otherwise already cased: by the storyboard, or by shown()
 
 
 WEAK = {'a', 'the', 'of', 'to', 'and', 'my', 'our', 'in', 'at', 'by', 'with', 'or'}   # don't end a line on these
@@ -590,7 +646,8 @@ def supers():
             spans = ''.join(f'<span id="{sid_}-w{k}" class="st{" y" if k >= len(words) - s.get("yellow_last", 0) else ""}">{w}</span>'
                             for k, w in enumerate(words))
             icon = f'<span class="pi">{SVG[s["icon"]]}</span>' if s.get('icon') in SVG else ''   # the SUPER's emoji, drawn
-            html.append(f'<div class="lt"><div id="{sid_}" class="plate words">{icon}{spans}</div></div>')
+            mc = '' if s['text'].upper() == s['text'] else ' mc'   # mixed case (as the storyboard wrote it): no caps tracking
+            html.append(f'<div class="lt"><div id="{sid_}" class="plate words{mc}">{icon}{spans}</div></div>')
             tw += [f"gsap.set('#{sid_}',{{autoAlpha:0}});", f"gsap.set('#{sid_} .st',{{autoAlpha:0}});",
                    f"tl.fromTo('#{sid_}',{{autoAlpha:0}},{{autoAlpha:1,duration:.25,immediateRender:false}},{a:.3f});",
                    f"tl.fromTo('#{sid_} .st',{{autoAlpha:0,scaleX:1.45,filter:'blur(8px)'}},{{autoAlpha:1,scaleX:1,filter:'blur(0px)',"
@@ -623,7 +680,7 @@ def end_card():
         y += round(ns * 1.12)
         sub = ' · '.join(x for x in (c.get('tagline', ''), c.get('handle', '')) if x)
         if sub:
-            inner.append(f'<div id="end-t" class="ctt" style="top:{y + 8}px">{sub.upper()}</div>')
+            inner.append(f'<div id="end-t" class="ctt" style="top:{y + 8}px">{sub}</div>')
         tw += ["gsap.set(['#end-v','#end-n','#end-t','#end-tap'],{autoAlpha:0});"]
         if c.get('verb'):
             tw += [pop('#end-v', END_IN + .3, .4, 'scale:.5'),
@@ -726,20 +783,6 @@ def tile(tid, name, art, size, label=True, x=0, y=0, wide=True):
                 f'{re.sub(r"[^A-Za-z0-9]", "", name)[:2]}</div>')
     lab = f'<div class="tn">{name}</div>' if label else ''
     return f'<div id="{tid}" class="ti" style="left:{x}px;top:{y}px;width:{w}px">{face}{lab}</div>'
-
-
-def screen_text(text, names=()):
-    """storyboard words drawn in a graphic: British spelling, sentence case ("In-Game Chat (Roblox)" -> "In-game chat
-    (Roblox)"); names, acronyms and anything in brackets keep their capitals"""
-    out, keep = [], {n.lower() for n in names} | PROPER
-    for k, w in enumerate(re.split(r'(\s+)', british(text))):
-        core = re.sub(r"[^\w'-]", '', w)
-        if not core or w.startswith('(') or core.isupper() and len(core) > 1 or core.lower() in keep:
-            out.append(w)
-        else:
-            out.append(w.lower())
-    t = ''.join(out)
-    return t[:1].upper() + t[1:]
 
 
 def chip(cid, text, color, x=None, y=0, icon=''):
@@ -873,7 +916,7 @@ def g_flow(g):
     inner = [chip(f'{gid}-t', g.get('title') or 'HOW IT HAPPENS', GOLD, None, 22, 'warn')]
     for k, st in enumerate(steps):
         y = top0 + k * (rh + gap)
-        text = screen_text(st['text'])
+        text = st['text']
         size = int(min(30, 690 / max(1e-6, text_width(text, 1, 'Inter-600-normal'))))
         inner.append(f'<div id="{gid}-r{k}" class="fr" style="top:{y}px"><div id="{gid}-n{k}" class="fn">{k + 1}</div>'
                      f'<div class="ft" style="font-size:{size}px">{text}</div></div>')
@@ -908,16 +951,16 @@ def g_stat(g):
         else:
             digits.append(f'<span class="dc">{ch}</span>')
     y = 78
-    inner = [chip(f'{gid}-s', (g.get('source') or 'STUDY').upper(), GOLD, None, 22)] if g.get('source') else []
+    inner = [chip(f'{gid}-s', g['source'], GOLD, None, 22)] if g.get('source') else []
     inner.append(f'<div class="num" style="top:{y}px;font-size:{size}px;height:{size}px">{"".join(digits)}</div>')
     y += round(size * 1.04)
-    lab = screen_text(g.get('label_text', '')) if g.get('label_text') else ''
+    lab = g.get('label_text', '')
     if lab:
         ls = int(min(62, 860 / max(1e-6, text_width(lab, 1, 'InterTight-800-normal'))))
         inner.append(f'<div id="{gid}-l" class="sl" style="top:{y}px;font-size:{ls}px">{lab}</div>')
         y += round(ls * 1.2)
     if g.get('note'):
-        inner.append(f'<div id="{gid}-n" class="sn" style="top:{y + 6}px">{screen_text(g["note"])}</div>')
+        inner.append(f'<div id="{gid}-n" class="sn" style="top:{y + 6}px">{g["note"]}</div>')
         y += 6 + 2 * 38
     H = y + 30
     html.append(f'<div class="pn" style="left:0;top:0;width:{GFX_W}px;height:{H}px">{"".join(inner)}</div>')
@@ -1007,7 +1050,7 @@ def g_map(g):
         q = [xy(*p) for p in ring_]
         cen[name] = (sum(x for x, _ in q) / len(q), sum(y for _, y in q) / len(q))
         lx, ly = min(x for x, _ in q), min(y for _, y in q)
-        inner.append(chip(f'{gid}-pl{n}', name.upper(), GOLD, round(max(mx + 8, min(lx, mx + mw - 200))), round(max(my + 8, min(ly - 46, my + mh - 50)))))
+        inner.append(chip(f'{gid}-pl{n}', name, GOLD, round(max(mx + 8, min(lx, mx + mw - 200))), round(max(my + 8, min(ly - 46, my + mh - 50)))))
     targets = g.get('targets', [])[:3]
     ts = 96
     col_x = mx + mw + 50
@@ -1327,7 +1370,7 @@ html,body{{width:1080px;height:1920px;overflow:hidden;background:#000}}
 .pn{{position:absolute;border-radius:30px;background:rgba(13,16,21,.9);border:1.5px solid rgba(255,255,255,.1);
   box-shadow:0 30px 80px rgba(0,0,0,.5),0 6px 18px rgba(0,0,0,.3)}}
 .chip{{position:absolute;display:inline-flex;align-items:center;gap:10px;padding:9px 18px 8px;border-radius:999px;font:600 20px Montserrat;
-  letter-spacing:.26em;white-space:nowrap;border:1.5px solid currentColor;background:rgba(0,0,0,.25)}}
+  letter-spacing:.12em;white-space:nowrap;border:1.5px solid currentColor;background:rgba(0,0,0,.25)}}
 .chip svg{{width:22px;height:22px}}
 .ti{{position:absolute;display:flex;flex-direction:column;align-items:center;gap:10px}}
 .tl{{display:flex;align-items:center;justify-content:center;overflow:hidden;flex:none;box-shadow:0 8px 22px rgba(0,0,0,.35)}}
@@ -1375,7 +1418,7 @@ html,body{{width:1080px;height:1920px;overflow:hidden;background:#000}}
 .tap{{position:absolute;left:50%;margin-left:-40px;width:80px;height:80px;border-radius:50%;border:4px solid rgba(255,255,255,.9)}}
 .ctn{{position:absolute;left:0;right:0;text-align:center;color:#fff;font-family:'Inter Tight';font-weight:900;line-height:1;letter-spacing:-.02em;
   white-space:nowrap}}
-.ctt{{position:absolute;left:0;right:0;text-align:center;color:#b8bfcb;font:600 28px Montserrat;letter-spacing:.3em}}
+.ctt{{position:absolute;left:0;right:0;text-align:center;color:#b8bfcb;font:600 30px Montserrat;letter-spacing:.06em}}
 .plate .pi{{display:inline-block;vertical-align:-6px;margin-right:.55em}}
 .plate .pi svg{{display:block}}
 
@@ -1386,6 +1429,8 @@ html,body{{width:1080px;height:1920px;overflow:hidden;background:#000}}
 .plate .st{{display:inline-block;letter-spacing:.24em;transform-origin:50% 50%}}
 .plate.words .st{{margin:0 .22em}}
 .plate .st.y{{color:{YEL}}}
+.plate.mc{{font-size:29px;font-weight:600}}
+.plate.mc .st{{letter-spacing:.02em}}
 .plate .ar{{display:inline-block;margin:0 .55em 0 .32em;color:{CREAM};vertical-align:2px}}
 .plate .ar svg{{display:block}}
 '''
@@ -1396,11 +1441,11 @@ GIRL_CSS = f'''
 .cbg.split{{background:radial-gradient(120% 80% at 50% 42%,#4a362c 0%,#261b16 55%,#150f0c 100%)}}
 #endc{{background:#1b1411}}
 .plate{{background:rgba(48,30,22,.52);border:1px solid rgba(255,248,239,.22);color:#FFF8EF;font:italic 400 50px 'Instrument Serif';
-  padding:8px 34px 12px 34px;text-transform:lowercase;box-shadow:0 12px 34px rgba(40,20,10,.35)}}
+  padding:8px 34px 12px 34px;box-shadow:0 12px 34px rgba(40,20,10,.35)}}
 .plate .st{{letter-spacing:0}}
 .plate.words .st{{margin:0 .12em}}
 .plate .ar{{vertical-align:8px}}
-.pill{{font:italic 400 40px 'Instrument Serif';letter-spacing:0;text-transform:lowercase;padding:4px 22px 9px 22px;
+.pill{{font:italic 400 40px 'Instrument Serif';letter-spacing:0;padding:4px 22px 9px 22px;
   background:rgba(40,26,20,.72);color:#FFF8EF}}
 .spark{{position:absolute;color:{YEL};line-height:1;text-shadow:0 0 18px rgba(250,230,122,.55);transform-origin:50% 50%}}
 .pw.script{{font-family:'Caveat';font-weight:600;font-style:normal;line-height:1;letter-spacing:.02em;color:#FFF8EF;
@@ -1621,6 +1666,13 @@ if '--plan' in sys.argv:
         print(f"graphic  {g['id']:8s} {g['a']:6.2f}-{g['b']:6.2f}  {g['kind']}  {g['visual'][:70]}")
 print(f"wrote {OUT}  look {LOOK}  reel {REEL_DUR:.3f}s (a-roll {DUR:.3f}s)  {len(CUTS)} cuts  {len(PUNCHES)} punch words"
       + (f"  {len(CUTAWAYS)} cutaways  {len(SUPERS)} supers{'  end card' if ENDC else ''}" if PLAN else ''))
+if STRICT:
+    print(f"storyboard text: {SB_TEXT[0]} of {SB_TEXT[1]} spoken words shown as its script writes them (the rest as the EDL "
+          f"lines write them); supers, labels and graphic text as written")
+    for _i, _t, _text, _it in PUNCHES:
+        _form = ' '.join(bare(WORDS[k]['shown']) for k in _i)
+        if ' '.join(bare(x) for x in _text.split()) != _form and PU['case'] != 'upper':
+            print(f"   PUNCH {_text!r} is not the script's form {_form!r}: on purpose?")
 if GFX:
     print(f"graphics: {len(GFX)} from the storyboard's VISUALS (captions under the face while they own the top of the frame)")
 for _w in GFX_TIGHT:

@@ -20,6 +20,9 @@ viewer was meant to see, so each one becomes a graphic. The template draws these
           picture the picture carries it; without one it is footage the folder does not have: tell the user
   custom  any other graphic: built as a transparent insert (references/overlays.md), assets/graphics/<id>.webm
 
+Every word a graphic shows is the storyboard's, exactly as written (case, spelling): the storyboard is the source of
+truth for on-screen text. Only emojis (drawn as icons) and em dashes (a comma) change.
+
 Standard library only.
 """
 import re
@@ -144,9 +147,9 @@ def meaning(text, default):
 
 
 def banner(q):
-    """'UNRESTRICTED: Gaming Platforms' -> ('UNRESTRICTED', 'GAMING PLATFORMS'); 'RESTRICTED' -> ('RESTRICTED', '')"""
+    """'UNRESTRICTED: Gaming Platforms' -> ('UNRESTRICTED', 'Gaming Platforms'): as written, the storyboard's words"""
     a, _, b = q.partition(':')
-    return strip_emoji(a).strip().upper(), strip_emoji(b).strip().upper()
+    return strip_emoji(a).strip(), strip_emoji(b).strip()
 
 
 def kind_of(it):
@@ -193,9 +196,9 @@ def describe(it, kind, map_names=(), folder_names=()):
             name = (m.group(1) if m else lab or '').strip()
             q = [strip_emoji(x).strip() for x in QUOTE.findall(c)]
             low = c.lower()
-            sides.append({'label': strip_emoji(name).upper(), 'items': entities(body or c, folder_names),
+            sides.append({'label': strip_emoji(name), 'items': entities(body or c, folder_names),
                           'label_tone': meaning(name, 'red' if not sides else 'green'),   # BANNED red, ALLOWED green
-                          'badge': q[0].upper() if q else '', 'tone': tone(c, 'red' if not sides else 'yellow'),   # the badge
+                          'badge': q[0] if q else '', 'tone': tone(c, 'red' if not sides else 'yellow'),   # the badge
                           'blink': bool(re.search(r'blink|flash|pulse', low))})
         g['sides'] = sides
     elif kind == 'flow':
@@ -221,7 +224,7 @@ def describe(it, kind, map_names=(), folder_names=()):
         rest = body[len(verb):].strip()
         m = re.match(r'(.+?)\s+((?:for|to|on|and|&)\s.+)$', rest)
         name, tag = (m.group(1), m.group(2)) if m else (rest, '')
-        g['cta'] = {'verb': verb.title(), 'name': name.strip(' .'), 'tagline': tag.strip(' .').lower(),
+        g['cta'] = {'verb': body[:len(verb)], 'name': name.strip(' .'), 'tagline': tag.strip(' .'),
                     'handle': (re.search(r'@[\w.]+', whole) or [''])[0]}
     return g
 
