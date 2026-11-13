@@ -62,6 +62,57 @@ def run(argv, env, cwd, every=30):
     return proc.wait(), list(last)
 
 
+JUMP_PX = 40   # the head's outline moves at most ~4px between two frames in real footage (12 pieces measured)
+
+
+def tops_of(alpha_frames, scale=4):
+    """per frame: the highest row (1920 scale) where the cutout covers the middle third of the frame (the head)"""
+    out = []
+    for f in alpha_frames:
+        rows = f[:, f.shape[1] // 3:2 * f.shape[1] // 3].max(axis=1) > 128
+        idx = rows.argmax() if rows.any() else len(rows)
+        out.append(int(idx) * scale)
+    return out
+
+
+def first_jump(tops, first, cuts, limit=JUMP_PX):
+    """(frame, px) of the first jump of the head's outline between two frames that is not at a cut, or None"""
+    for k in range(1, len(tops)):
+        n = first + k
+        if abs(tops[k] - tops[k - 1]) > limit and not any(abs(n - c) <= 1 for c in cuts):
+            return n, abs(tops[k] - tops[k - 1])
+    return None
+
+
+def head_jumps(piece, first, cuts):
+    """a delivered reel lost letters of words behind the head for 4-17 frames: the cutout's silhouette sat ~90px above
+    the head, then snapped back. Reads the piece's alpha at 270x480."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    raw = subprocess.run([skillenv.tool('ffmpeg'), '-v', 'error', '-c:v', 'libvpx-vp9', '-i', piece, '-vf', 'alphaextract,scale=270:480',
+                          '-f', 'rawvideo', '-pix_fmt', 'gray', '-'], capture_output=True).stdout
+    if not raw:
+        return None
+    return first_jump(tops_of(np.frombuffer(raw, np.uint8).reshape(-1, 480, 270)), first, cuts)
+
+
+def drop_masks(folder, a, b):
+    for n in range(a, b):
+        f = os.path.join(folder, f'{n:05d}.png')
+        if os.path.exists(f):
+            os.remove(f)
+
+
+def load_json(f):
+    try:
+        with open(f, encoding='utf-8') as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
 def aroll_key(path):
     """the a-roll's identity: a re-assembled a-roll gets new pieces and new masks"""
     st = os.stat(path)
@@ -216,6 +267,17 @@ def main():
               f"({dev}); every piece frame-exact")
     else:
         print('cutout: every piece already cut out')
+    cuts = {s['frame'] for s in (load_json(os.path.join(proj, 'segments.json')) or [])}
+    for p in need:   # a silhouette that jumps between two frames: its masks are made again, once
+        jump = head_jumps(path(p['file']), p['a'], cuts)
+        if jump and engine == 'ours':
+            print(f"   {p['file']}: the cutout's head jumps {jump[1]}px at frame {jump[0]} (not a cut): making its masks again", flush=True)
+            drop_masks(os.path.join(proj, 'work', 'masks', key), p['a'], p['b'])
+            matte.cut(aroll, [(p['a'], p['b'], path(p['file']))], device_arg(sys.argv), os.path.join(proj, 'work', 'masks', key), 1)
+            jump = head_jumps(path(p['file']), p['a'], cuts)
+        if jump:
+            print(f"NOTE {p['file']}: the cutout's head jumps {jump[1]}px at frame {jump[0]}: look at that frame (a fast lean, or a "
+                  f"mask that misfired; a word behind the head there may lose letters)", flush=True)
 
 
 if __name__ == '__main__':

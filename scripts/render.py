@@ -430,6 +430,32 @@ class LiveEncoder:
         self.proc.wait()
 
 
+def heal_words(proj, safe, redraw, rounds=2):
+    """a word behind the head that loses letters for a few frames (scripts/wordcheck.py): throw those frames away from
+    the start of their cutout piece (a keyframe of the cutout video) and draw them again. -> (redrawn?, glitches left)"""
+    import wordcheck
+    try:
+        with open(os.path.join(proj, 'work', 'cutout_plan.json'), encoding='utf-8') as fh:
+            pieces = json.load(fh).get('pieces', [])
+    except (OSError, ValueError):
+        pieces = []
+    healed = False
+    for _ in range(rounds):
+        bad = wordcheck.scan(proj, safe)
+        if not bad:
+            return healed, []
+        for text, x, y in bad:
+            start = next((p['a'] for p in pieces if p['a'] <= x < p['b']), x)
+            print(f'   {text!r} lost letters in frames {x}-{y}: drawing frames {start}-{y} again', flush=True)
+            for n in range(start, y + 1):
+                f = os.path.join(safe, f'{n:05d}.png')
+                if os.path.exists(f):
+                    os.remove(f)
+        redraw()
+        healed = True
+    return healed, wordcheck.scan(proj, safe)
+
+
 def main():
     skillenv.utf8_stdio()
     proj, name = skillenv.path_arg(sys.argv[1]), sys.argv[2]
@@ -463,6 +489,12 @@ def main():
         if live:
             live.kill()
         raise
+    healed, left = heal_words(proj, safe, lambda: frames_of(proj, name, total, force, stats, fast='--no-fast-png' not in sys.argv))
+    if healed and live:   # frames were drawn again after the live encode took them: encode from the folder instead
+        live.kill()
+        live = None
+    for text, x, y in left:
+        print(f'WORD GLITCH {text!r} frames {x}-{y} after two redraws: look at them (scripts/wordcheck.py)', flush=True)
     t_frames = time.time() - t0
     if not (live and live.finish()):   # no overlap (8 GB and less), or the live encode broke: encode now
         subprocess.run(encode_args(ff, wav, crf, total, out, safe), check=True)

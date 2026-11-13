@@ -172,6 +172,19 @@
 - Large file uploads to chat can fail: deliver a 720p crf 26-28 phone copy and keep the full render on disk.
 - Pinterest/Instagram pages block logged-out browsing; curl the page HTML or use Apify.
 
+## Revisions from a delivered reel (spm grade boundaries)
+- Words behind the head lost a band of letters for 4-17 frames ("ans  r?", "cam   ge", a half-faded "parents"), then
+  came back whole: the cutout's silhouette sat ~90px above the head (the wall from the cutout layer painted over the
+  letters) and snapped back. Not reproduced on the Linux laptop (a render session starting mid-piece drew it whole), so
+  three guards catch it wherever it comes from: cutout.py remakes a piece whose head outline jumps >40px between two
+  frames (real footage: 4px), render.py redraws any resting word that loses >14% of its pixels in a jump (from the
+  start of its cutout piece) before encoding, check_cuts.py reports WORDS OK.
+- A SUPER plate ran off both sides of the frame ("DEBATED IN PARLIAMENT · FIXED VS. SHIFTING GRADES"): plates now
+  shrink to fit 880px and wrap onto two lines below a readable size.
+- A punch word typed lower case ("malaysia's") went out lower case: a typed punch word gets the capital its spoken word
+  has (a name), and in storyboard mode the script's form.
+- The closing frame showed the last SUPER above the CTA: a closing-frame VISUALS line is now the whole end card.
+
 ## Storyboard
 - A storyboard whose rows have no pictures is not a storyboard without visuals: the under-16 reel's VISUALS described
   six graphics (a stamped phone, a banned-vs-allowed split, a flowchart, a stat card, a map, a closing frame) and the

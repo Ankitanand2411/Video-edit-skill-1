@@ -159,6 +159,10 @@ captions still follow what was said.
   4K, 1.5 from 1080p, 1.35 from 720p (more is visibly soft). Keep the eye line level: choose cy so the eyes sit at
   the same y as in the wide (`cy = (eye_y_src - (0.5 - eye_y_wide) * h_src / zoom) / h_src` with eye_y as fractions);
   the cut then reads as a push towards the eyes and leaves wall space above the head for type.
+- A shot never shows the speaker reaching for the phone: a take starts with them leaning back after pressing record
+  and ends as they reach to stop it. LOOK at the first and last frames of every shot near a clip's start or end;
+  headpos.py prints NOTE CLOSE TO THE LENS for a shot that opens or ends on the lean (a delivered reel kept 1.5s of it
+  and cut into another take on a blurred lean, which read as a flicker). Start after it, or drop the shot.
 - Ending: keep ~1s after the last word when the speaker holds a look (a reflective beat reads as an ending; it also
   gives the last punch word time to land). A sign-off spoken too quietly to be heard is cut (tell the user).
 - `line`: exactly what is said in that segment, with punctuation, in British spelling (align.py uses it as the caption
@@ -180,7 +184,7 @@ captions still follow what was said.
 ```bash
 PY SK/scripts/assemble.py <project>          # check_edl first; aroll.mp4 (30fps CFR), segments.json, voice (normalised)
 PY SK/scripts/align.py <project>             # words.json: per-shot word times; exit 1 if a cut clipped a line's ends
-PY SK/scripts/headpos.py <project>           # headpos.json (head top per shot) for placement: 3 masks a shot, no cutout
+PY SK/scripts/headpos.py <project>           # headpos.json (head top per shot) for placement; NOTE CLOSE TO THE LENS = fix the EDL
 PY SK/scripts/storyboard_plan.py <project>   # storyboard mode: storyboard_plan.json (scenes, graphics, cutaways, supers, end card)
 ```
 assemble.py cuts the shots side by side into lossless intermediates and compresses the a-roll once (~1 min a reel).
@@ -245,7 +249,8 @@ lossless PNGs with the fast encoder (same pixels, ~35% less time a frame), encod
 1 browser: 1246 ms a frame before, 816 with the fast PNGs, 385 on a frame without the cutout layer.
 check_cuts.py reads every cut frame in one pass and makes the phone copy while it checks lip sync (~30 s).
 Look at `work/cut_check.jpg` (make a bigger grid when it is too small to judge): every after-cut frame shows the
-new shot cleanly. check_cuts.py also prints lip sync per shot against the original clip: it must say LIP SYNC OK. Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
+new shot cleanly. check_cuts.py also prints lip sync per shot against the original clip: it must say LIP SYNC OK, and WORDS OK (no word behind
+the head loses letters: render.py already redrew any that did, scripts/wordcheck.py). Check audio peaks (`volumedetect`, max around -2 to -5 dB) and the silence at section joins.
 Storyboard pictures: crop a card from a render frame and compare it with its display copy (PSNR > 40 dB).
 
 ### 8. Deliver
