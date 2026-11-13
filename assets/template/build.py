@@ -401,8 +401,12 @@ def resolve_punch():
         it = PU['italic'] if PU['italic'] is not None else it
         lead, mid, trail = re.match(r"^(\W*)(.*?)(\W*)$", text).groups()
         said = [WORDS[i + k] for k in range(len(toks))]
-        if STRICT and len(mid.split()) == len(said) and all(same_word(a, b['text']) for a, b in zip(mid.split(), said)):
-            text = lead + ' '.join(bare(w['shown']) for w in said) + trail   # the words as the storyboard writes them
+        if len(mid.split()) == len(said) and all(same_word(a, b['text']) for a, b in zip(mid.split(), said)):
+            # storyboard mode: the words as the storyboard writes them; otherwise a name keeps its capital ("malaysia's"
+            # typed for the punch word went out lower case twice in one reel)
+            text = lead + ' '.join(bare(w['shown']) if STRICT or (x.islower() and bare(w['shown']) != x.lower() and
+                                                                  bare(w['shown']).lower() == x.lower()) else british(x)
+                                   for x, w in zip(mid.split(), said)) + trail
         else:
             text = british(text)
         found.append((list(range(i, i + len(toks))), WORDS[i]['start'], text if PU['case'] != 'upper' else text.upper(), it))
@@ -621,6 +625,34 @@ ARROW = ('<svg width="34" height="14" viewBox="0 0 34 14"><path d="M1 7h30M25 1.
          'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>')   # the fonts carry no arrow glyph
 
 
+PLATE_W = 880   # widest a plate may be: centred, it stays clear of the safe sides and Instagram's icon column
+
+
+def plate_fit(words, mc, icon=False, arrows=0):
+    """CSS that keeps a SUPER plate inside the frame. A delivered reel's plate ("DEBATED IN PARLIAMENT · FIXED VS.
+    SHIFTING GRADES") ran off both sides: the size comes down to fit, and below a readable size the plate wraps onto
+    two lines."""
+    if L['fx'] == 'girl':
+        font, size, track, gap, small = 'InstrumentSerif-400-italic', 50, 0, .12, 36
+    elif mc:
+        font, size, track, gap, small = 'Montserrat-600-normal', 29, .02, .22, 22
+    else:
+        font, size, track, gap, small = 'Montserrat-500-normal', 26, .24, .22, 20
+    per_em = sum(text_width(w, 1, font, track) + 2 * gap for w in words) + arrows * (34 / size + .87)
+    room = PLATE_W - 60 - (40 if icon else 0)
+    if per_em * size <= room:
+        return ''
+    fit = int(room / per_em)
+    if fit >= small:
+        return f'font-size:{fit}px'
+    return f'font-size:{small}px;white-space:normal;max-width:{PLATE_W}px;line-height:1.45;border-radius:26px'
+
+
+def lt_style(fit):
+    """a plate that wraps grows upwards from the bottom of the safe zone (y 1466) instead of down into the caption bar"""
+    return ' style="top:auto;bottom:454px"' if 'white-space:normal' in fit else ''
+
+
 def supers():
     html, tw = [], []
     for s in SUPERS:
@@ -631,7 +663,8 @@ def supers():
                 if k:
                     parts.append(f'<span id="{sid_}-a{k}" class="ar">{ARROW}</span>')
                 parts.append(f'<span id="{sid_}-s{k}" class="st">{word}</span>')
-            html.append(f'<div class="lt"><div id="{sid_}" class="plate">{"".join(parts)}</div></div>')
+            fit = plate_fit([w for _, w in s['steps']], s['steps'][0][1].upper() != s['steps'][0][1], arrows=len(s['steps']) - 1)
+            html.append(f'<div class="lt"{lt_style(fit)}><div id="{sid_}" class="plate" style="{fit}">{"".join(parts)}</div></div>')
             tw += [f"gsap.set('#{sid_}',{{autoAlpha:0}});", f"gsap.set('#{sid_} .st, #{sid_} .ar',{{autoAlpha:.3}});",
                    f"tl.fromTo('#{sid_}',{{autoAlpha:0,y:16}},{{autoAlpha:1,y:0,duration:.35,ease:'power3.out',immediateRender:false}},{a + .15:.3f});"]
             for k, (t, _) in enumerate(s['steps']):
@@ -647,7 +680,8 @@ def supers():
                             for k, w in enumerate(words))
             icon = f'<span class="pi">{SVG[s["icon"]]}</span>' if s.get('icon') in SVG else ''   # the SUPER's emoji, drawn
             mc = '' if s['text'].upper() == s['text'] else ' mc'   # mixed case (as the storyboard wrote it): no caps tracking
-            html.append(f'<div class="lt"><div id="{sid_}" class="plate words{mc}">{icon}{spans}</div></div>')
+            fit = plate_fit(words, bool(mc), icon=bool(icon))
+            html.append(f'<div class="lt"{lt_style(fit)}><div id="{sid_}" class="plate words{mc}" style="{fit}">{icon}{spans}</div></div>')
             tw += [f"gsap.set('#{sid_}',{{autoAlpha:0}});", f"gsap.set('#{sid_} .st',{{autoAlpha:0}});",
                    f"tl.fromTo('#{sid_}',{{autoAlpha:0}},{{autoAlpha:1,duration:.25,immediateRender:false}},{a:.3f});",
                    f"tl.fromTo('#{sid_} .st',{{autoAlpha:0,scaleX:1.45,filter:'blur(8px)'}},{{autoAlpha:1,scaleX:1,filter:'blur(0px)',"
@@ -1116,6 +1150,16 @@ def graphics():
 # ------------------------------------------------------------------ cool girl extras: handwritten punch word, sparkles
 SCRIPT_FONT, SCRIPT_LH = 'Caveat-600-normal', 1.0
 POS = {}   # punch display text -> (top, size, front, font, a, b), filled by core()
+BEHIND = []   # behind-head words for scripts/wordcheck.py: box, colour, resting window (work/reel.json "behind")
+
+
+def behind_box(text, top, size, font, lh, col, rest_a, b):
+    """where a behind-head word rests: render.py checks those frames for a word losing letters and draws them again"""
+    w = text_width(text, size, font, PU['track'] if font != SCRIPT_FONT else 0, .04) * 1.06 + 24   # + the shot's push-in
+    rest_b = b - (0 if at_cut(b) else .25)
+    if rest_b - rest_a >= .2:
+        BEHIND.append({'text': text, 'rest': [round(rest_a, 3), round(rest_b, 3)], 'colour': col,
+                       'box': [round(540 - w / 2), round(top - .08 * size), round(540 + w / 2), round(top + size * lh * 1.12)]})
 
 
 def script_k():
@@ -1225,6 +1269,7 @@ def core():
             back_html.append(script_div(f's{k}', text, top, size))
             POS[text] = (top, size, False, SCRIPT_FONT, a, b)
             tw += script_in(f'#s{k}', a, len(text))
+            behind_box(text, top, size, SCRIPT_FONT, 1.0, '#FFF8EF', a + .032 * len(text) + .55, b)
         else:
             top, size = behind_head(sid, a, b, text, it)
             if size < SMALL * PU['size'][shot(sid)]:   # a high head in a close-up leaves no room: say so now, not after the render
@@ -1232,6 +1277,8 @@ def core():
             back_html.append(punch_div(f's{k}', text, it, top, size))
             POS[text] = (top, size, False, PU['font_it'] if it else PU['font'], a, b)
             tw += punch_in(f'#s{k}', a)
+            behind_box(text, top, size, PU['font_it'] if it else PU['font'], PU['lh'], PU['color'],
+                       a + {'mask': .6 + .028 * len(text), 'rise': .45}.get(PU['anim'], .3) + .1, b)
         if b >= DUR - .01:
             continue
         if b - a < .8 or at_cut(b) or (win and abs(b - win['b']) < .01):   # short, or ends on a cut: hard out
@@ -1645,7 +1692,7 @@ with open(OUT, 'w', encoding='utf-8', newline='\n') as _f:
 os.makedirs('work', exist_ok=True)
 with open('work/reel.json', 'w', encoding='utf-8') as _f:   # for scripts/render.py: length + the audio mix
     json.dump({'look': LOOK, 'aroll_dur': DUR, 'reel_dur': round(REEL_DUR, 4), 'frames': round(REEL_DUR * 30),
-               'storyboard_missing': MISSING,
+               'storyboard_missing': MISSING, 'behind': BEHIND,
                'sfx': [{'name': n, 't': round(t, 3), 'dur': round(min(SFX_LEN[n], REEL_DUR - t), 3), 'vol': round(v * SFX_GAIN, 3)}
                        for n, t, v in SFX]}, _f, indent=1)
 if not RANGE:   # for scripts/cutout.py: the pieces this page shows

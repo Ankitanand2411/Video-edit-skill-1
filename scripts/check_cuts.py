@@ -7,7 +7,7 @@ new shot with that section's look and no leftovers (room plates, cutout of the p
 Snapshots from `hyperframes snapshot` seek approximately at cuts; only frames pulled from the final render are proof.
 --phone also writes <render>-phone.mp4 (720p, crf 26, the render's own audio copied; SendUserFile uploads over ~5MB
 often fail, drop to crf 28).
-It also checks lip sync: each shot's sound in the render is located in the original clip and compared with the
+It also checks every word behind the head for frames where it loses letters (WORDS OK), and lip sync: each shot's sound in the render is located in the original clip and compared with the
 picture's source time (sources.json + segments.json); every shot should read 0 ms (a few ms is fine).
 """
 import json
@@ -87,6 +87,13 @@ def sync_check():
 
 if '--no-sync' not in sys.argv:
     sync_check()
+if os.path.isfile(os.path.join(proj, 'work', 'reel.json')):   # words behind the head that lose letters (wordcheck.py)
+    import wordcheck
+    _bad = wordcheck.scan(proj, render)
+    for _t, _x, _y in _bad:
+        print(f'WORD GLITCH {_t!r}: frames {_x}-{_y} ({_x / 30:.2f}-{(_y + 1) / 30:.2f}s) lose part of the word')
+    print('WORDS OK: every word behind the head stays whole' if not _bad else
+          f'{len(_bad)} word glitch(es): run render.py again (it redraws them) and check again')
 if '--phone' in sys.argv:
     th.join()
     if not phone:
