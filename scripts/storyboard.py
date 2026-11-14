@@ -106,7 +106,7 @@ def folder_images(src, proj):
 
 BRANDS = {   # brand -> how a storyboard names it (title, BRAND cell, CTA, file name). build.py has the colours.
     'afterschool': r'after\s?school',
-    'schooladvisor': r'school\s?advisor|\bSA\s*_?\s*news\b|thisisschooladvisor',
+    'schooladvisor': r'school\s?advisor|(?<![A-Za-z])SA[\s_-]*news|thisisschooladvisor',   # "SA _News_3Nov2026_..."
 }
 
 
