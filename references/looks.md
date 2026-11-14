@@ -8,7 +8,8 @@ The user's default look is in `config.json` (`defaultLook`); a line in the scrip
 ("you can get the cool girl aesthetic like this") switches that section to it.
 
 ## Bold (default base look)
-Kinetic lowercase words placed around the speaker, the big ones tucked BEHIND the head.
+Kinetic lowercase punch words placed around the speaker, the big ones tucked BEHIND the head (the running captions
+are in sentence case with their punctuation in every look; cool dude's are caps).
 - Grade on footage layers (`.g` = base video + cutout): `contrast(1.07) saturate(.9) brightness(.97)`, plus a soft-light teal/warm tone, light vignette, and dark gradients top/bottom for legibility. Keep skin natural: darker versions push faces red.
 - Type: Inter Tight, lowercase, `letter-spacing:-.05em`, `line-height:.9`, white with soft shadow `0 10px 40px rgba(0,0,0,.55)`.
   - `sm` 84px/800 lead-in lines, `sm2` 56px/800 for long lines, `md` 150px, `big` 236px, `xl` 220px, `huge` 300px (900 weight). Yellow `y` class for the punch word.

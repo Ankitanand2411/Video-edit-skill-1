@@ -115,13 +115,18 @@ One command style that works in zsh, bash, Git Bash and PowerShell:
 7. Prove cuts from the final render, not from snapshots.
 8. Never delete the user's files. Originals are read, never modified.
 9. Storyboard mode: the storyboard is the source of truth for every word on screen, in every video. Captions take
-   each spoken word's spelling and capitals from its SCRIPT (build.py aligns them: "Deputy Police Chief", "100,000",
-   "Gaming platforms"; a word the script does not have shows as the EDL line writes it). SUPERs, labels, badges, steps,
+   each spoken word's spelling, capitals and punctuation from its SCRIPT, and its grammar where the host slipped by a
+   word or two (build.py aligns them: "Deputy Police Chief", "100,000", "Gaming platforms."; a word the script does not
+   have shows as the EDL line writes it). The takes follow the script's order of talking points (storyboard_plan.py
+   prints ORDER when they do not). Punch words come from the storyboard's own phrases first. SUPERs, labels, badges, steps,
    numbers and the closing frame appear exactly as written: no forced CAPS, no lower-casing, no respelling. Only
    emojis (drawn as icons) and em dashes (a comma) change. Every VISUALS line is built (picture card, graphic or
    insert) and its effects with it (a flip, a blink, a glow, lines drawn on); the MOOD sets the pace of the cut and
    the grade ("Vibrant": a touch more colour). build.py prints how many words follow the script and flags a PUNCH
    whose text is not the script's.
+10. Brand: the storyboard names it (Afterschool, School Advisor) and its text boxes carry it: Afterschool purple
+   #413370 with white text, School Advisor blue #113DA5 with white text (references/storyboard.md, Brand).
+11. Captions are in sentence case with their punctuation: a capital where a sentence starts, its full stops and commas.
 
 ## Workflow
 
@@ -152,7 +157,8 @@ captions still follow what was said.
 - Rebuild the script from the takes: people repeat a line until it lands. Use the LAST complete clean take unless
   the user says otherwise ("the better section starts at 0:47" means one continuous take from there).
 - In/out points from the speech map: start ~0.05-0.07s before the first word, end at the silence start after the
-  last word. Kill dead air between sections and false starts; confirm short pauses with silencedetect before
+  last word: a shot holds the host speaking and nothing else, never a breath, a pause or a reach to the phone
+  (check_edl.py fails more than 0.3s before the first word or 0.45s after the last). Kill dead air between sections and false starts; confirm short pauses with silencedetect before
   trimming (Whisper can invent a leading word at a cut, and it misses fast words like "So I was" before a pause:
   a fast burst before a pause is easy to misjudge, "So I was" was once taken for "So" and cut off a line).
 - Two segments in a row from the same angle: alternate wide / close. Close-up zoom depends on the source: 1.9 from

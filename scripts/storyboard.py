@@ -8,7 +8,7 @@ Expected sheet (one row per scene, header row names the columns, any order):
   plus optional BRAND / TITLE and MOOD cells above the table (e.g. "Color, Music, Pace: Vibrant, Inspirational, Medium").
 
 Writes:
-  storyboard.json   {"title", "mood", "scenes": [{"scene", "visuals": [...], "super", "script", "images"}],
+  storyboard.json   {"title", "mood", "brand" (afterschool / schooladvisor / null: its colours on screen), "scenes": [{"scene", "visuals": [...], "super", "script", "images"}],
                      "folder_images": [{"file", "names", "kind", "size"}]}
   assets/storyboard/<nn>-<scene>.<ext>   every embedded picture, byte-for-byte (no re-encode: full quality is kept;
                                          build.py makes exact-size display copies from these)
@@ -104,6 +104,22 @@ def folder_images(src, proj):
     return out
 
 
+BRANDS = {   # brand -> how a storyboard names it (title, BRAND cell, CTA, file name). build.py has the colours.
+    'afterschool': r'after\s?school',
+    'schooladvisor': r'school\s?advisor|(?<![A-Za-z])SA[\s_-]*news|thisisschooladvisor',   # "SA _News_3Nov2026_..."
+}
+
+
+def brand_of(texts):
+    """the brand a storyboard is for, from everything it says (its file name too), or None"""
+    hits = {}
+    for t in texts:
+        for slug, pat in BRANDS.items():
+            hits[slug] = hits.get(slug, 0) + len(re.findall(pat, t or '', re.I))
+    best = max(hits, key=hits.get) if hits else None
+    return best if best and hits[best] else None
+
+
 def blocks(text):
     """'VISUALS: ... SUPER: ... SCRIPT / VO: ...' -> dict of the three blocks"""
     keys = {'VISUALS': 'visuals', 'SUPER': 'super', 'SCRIPT / VO': 'script', 'SCRIPT/VO': 'script', 'SCRIPT': 'script', 'VO': 'script'}
@@ -192,10 +208,13 @@ def main():
                 fh.write(data)   # untouched bytes: no quality lost
             sc['images'].append({'file': f'assets/storyboard/{fn}', 'size': image_size(data), 'source_part': part})
         scenes.append(sc)
-    sb = {'source': os.path.abspath(src), 'title': title, 'mood': mood, 'scenes': scenes, 'folder_images': folder_images(src, proj)}
+    brand = brand_of([os.path.basename(src), title] + list(cells.values()))
+    sb = {'source': os.path.abspath(src), 'title': title, 'mood': mood, 'brand': brand, 'scenes': scenes,
+          'folder_images': folder_images(src, proj)}
     with open(os.path.join(proj, 'storyboard.json'), 'w', encoding='utf-8') as fh:
         json.dump(sb, fh, indent=1, ensure_ascii=False)
-    print(f"{title}  |  mood: {' / '.join(l.strip('- ') for l in mood.splitlines() if l.strip())}")
+    print(f"{title}  |  mood: {' / '.join(l.strip('- ') for l in mood.splitlines() if l.strip())}  |  brand: "
+          f"{brand or 'none found (write it into storyboard.json: afterschool / schooladvisor)'}")
     for s in scenes:
         imgs = ', '.join(f"{i['file']} {i['size'][0]}x{i['size'][1]}" for i in s['images']) or 'no image'
         print(f"- {s['scene']}: super {s['super']!r} | {imgs}\n    script: {s['script'][:110]}")
