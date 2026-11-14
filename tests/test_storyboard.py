@@ -222,6 +222,7 @@ class ScreenCase(unittest.TestCase):
     def test_captions_take_the_scripts_words(self):
         ns = template({'bare', 'script_tokens', 'storyboard_forms'},
                       {'re': re, 'SPELL': None, 'norm': lambda t: re.sub(r"[^\w'-]", '', t).lower().replace('isation', 'ization')})
+        ns['SWAPS'] = []
         ns['SB_DOC'] = {'scenes': [{'script': "Malaysia's former Deputy Police Chief warned that children as young as 12 had been "
                                               'recruited... from grooming and radicalization. Here at home, MCMC is now looking.'}]}
         said = "Malaysia's former deputy police chief warned that kids as young as 12 radicalisation. here at home, MCMC".split()
@@ -229,9 +230,28 @@ class ScreenCase(unittest.TestCase):
         ns['storyboard_forms']()
         got = [w['shown'] for w in ns['WORDS']]
         self.assertEqual(got[:5], ["Malaysia's", 'former', 'Deputy', 'Police', 'Chief'])   # the script's capitals
-        self.assertEqual(got[7], 'kids')                                                   # not in the script: as said
-        self.assertIn('radicalization.', got)                                              # the script's spelling
+        self.assertEqual(got[7], 'children')   # a one-word slip inside a scripted sentence: the script's word (its grammar)
+        self.assertIn('radicalization.', got)                                              # the script's spelling + its full stop
         self.assertEqual(got[-4:], ['Here', 'at', 'home,', 'MCMC'])
+        self.assertEqual(got[:2], ["Malaysia's", 'former'])
+        self.assertEqual(len(ns['SWAPS']), 1)   # kids -> children, printed for review
+
+
+class BrandAndMotion(unittest.TestCase):
+    def test_brand_from_the_storyboard(self):
+        self.assertEqual(storyboard.brand_of(['SA _News_3Nov2026_Video 2-Is Malaysia_s Under-16 ...xlsx']), 'schooladvisor')
+        self.assertEqual(storyboard.brand_of(['Closing Frame: Follow School Advisor for more education News - CTA']), 'schooladvisor')
+        self.assertEqual(storyboard.brand_of(['BRAND', 'Afterschool', 'Exam tips for SPM']), 'afterschool')
+        self.assertIsNone(storyboard.brand_of(['How handwriting helps the brain learn to read']))
+
+    def test_picture_animation_from_visuals(self):
+        a = storyboard_plan.card_anim
+        self.assertEqual(a('Campus photo slides in from the left as he names it'), 'slide-left')
+        self.assertEqual(a('Slow zoom in on the boarding house'), 'push')
+        self.assertEqual(a('Ken Burns on the aerial shot of the 90-acre campus'), 'push')
+        self.assertEqual(a('Zoom out to reveal the whole school'), 'pull')
+        self.assertEqual(a('Logo pops up beside him'), 'pop')
+        self.assertEqual(a('Students in the library'), '')
 
 if __name__ == '__main__':
     unittest.main()

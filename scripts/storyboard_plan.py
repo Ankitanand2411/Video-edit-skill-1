@@ -148,6 +148,27 @@ def picture_for(name, folder):
     return out
 
 
+ANIMS = [   # how a VISUALS line words a picture's motion -> the card's animation (build.py card_in / push)
+    ('slide-left', r'(slides?|swipes?|comes?|moves?) in from (the )?left|from the left'),
+    ('slide-right', r'(slides?|swipes?|comes?|moves?) in from (the )?right|from the right'),
+    ('slide-down', r'(slides?|drops?|comes?) (in |down )?from (the )?(top|above)'),
+    ('slide-up', r'(slides?|rises?|comes?) (in |up )?from (the )?(bottom|below)'),
+    ('pull', r'zoom(s|ing)? out|pull(s|ing)? (back|out)|widens?'),
+    ('push', r'zoom(s|ing)?( in| into)?|push(es|ing)? in|ken burns|slow(ly)? (zoom|push)|close[- ]?in'),
+    ('pop', r'\bpops?( up| in)?\b|bounces?'),
+    ('flip', r'\bflips?\b'),
+    ('fade', r'fades? in|dissolves?'),
+]
+
+
+def card_anim(text):
+    """the first animation a scene's VISUALS ask of its picture, or '' (the default soft rise)"""
+    for name, pat in ANIMS:
+        if re.search(pat, text, re.I):
+            return name
+    return ''
+
+
 def plan_graphics(sb, words, scenes):
     """VISUALS graphics, timed: [{id, scene, kind, a, b, ...beats}], plus the coverage list"""
     names, folder = map_names(), sb.get('folder_images', [])
@@ -322,6 +343,13 @@ def main():
         for i in range(blk.size):
             match[blk.b + i] = sb_scene[blk.a + i]
     n = len(sb['scenes'])
+    order = [match[i] for i in sorted(match)]   # the talking points in the order the cut says them
+    for i in range(4, len(order)):
+        if order[i] < max(order[:i]) and len(set(order[i:i + 4])) == 1 and order[i] == min(order[i:i + 4]):
+            w = words[sorted(match)[i]]
+            print(f"ORDER: at {w['start']:.2f}s the cut goes back to scene {sb['scenes'][order[i]]['scene']} after "
+                  f"{sb['scenes'][max(order[:i])]['scene']}: the storyboard's order of talking points is the cut's order")
+            break
     first = {k: min((i for i, s in match.items() if s == k), default=None) for k in range(n)}
     last = {k: max((i for i, s in match.items() if s == k), default=None) for k in range(n)}
     bounds = [0.0]
@@ -402,7 +430,7 @@ def main():
                 if se - sa > 4.5:
                     sa = se - 4.5
                 cutaways.append({'id': f'card{k + 1}', 'kind': 'card', 'scene': sc['scene'], 'image': img,
-                                 'a': round(sa, 3), 'b': round(se, 3),
+                                 'a': round(sa, 3), 'b': round(se, 3), 'anim': card_anim(vis),
                                  'why': f"shot {s['id']}: " + (', '.join(words[i]['text'] for i in hit) if hit else 'no keyword match, closest length')})
         if sup:
             steps = [p.strip() for p in re.split(r'\s*(?:→|->|>)\s*', sup) if p.strip()]
@@ -437,14 +465,15 @@ def main():
         for g in graphics:
             if c['a'] < (g['then']['b'] if g.get('then') else g['b']) and g['a'] < c['b']:
                 print(f"NOTE cutaway {c['id']} {c['a']:.2f}-{c['b']:.2f} overlaps graphic {g['id']} {g['a']:.2f}-{g['b']:.2f}: move one")
-    plan = {'scenes': scenes, 'graphics': graphics, 'cutaways': cutaways, 'supers': supers, 'end_card': end_card, 'coverage': coverage,
+    plan = {'brand': sb.get('brand'), 'scenes': scenes, 'graphics': graphics, 'cutaways': cutaways, 'supers': supers, 'end_card': end_card, 'coverage': coverage,
             'mood': sb.get('mood', ''), 'reel_end': round((end_card['in'] + end_card['hold']) if end_card else reel_end, 3)}
     with open(os.path.join(proj, 'storyboard_plan.json'), 'w', encoding='utf-8') as fh:
         json.dump(plan, fh, indent=1, ensure_ascii=False)
     for s in scenes:
         print(f"scene {s['scene']:10s} {s['start']:6.2f}-{s['end']:6.2f}  ({s['matched_words']} script words matched)")
     for c in cutaways:
-        print(f"cutaway {c['kind']:5s} {c['a']:6.2f}-{c['b']:6.2f}  {c['scene']:10s} {c['why']}")
+        print(f"cutaway {c['kind']:5s} {c['a']:6.2f}-{c['b']:6.2f}  {c['scene']:10s} {c['why']}"
+              + (f"  [{c['anim']}]" if c.get('anim') else ''))
     for s in supers:
         print(f"super {s['kind']:5s} {s['a']:6.2f}-{s['b']:6.2f}  " + (' > '.join(f'{w}@{t:.2f}' for t, w in s['steps']) if s['kind'] == 'steps' else s['text']))
     for g in graphics:

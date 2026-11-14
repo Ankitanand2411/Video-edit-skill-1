@@ -27,8 +27,9 @@ Per shot (times are the source clip's):
   6. a final "s" cut off: the line's last word ends in an s sound and a hiss starts just after the out-point, with
      only quiet between (the "p" of "shapes" closed, the cut fell there, its "s" came 0.1s later). The same for an
      opening "s" before an in-point. FAIL with the point to use.
-  7. the reel's first shot opening on more than OPEN_GAP s of silence before its first word: FAIL (a hook starts on
-     its first word; "hold_ok": true on that segment keeps a held look on purpose).
+  7. a shot that keeps more than the host speaking: over LEAD_MAX s before its first word (OPEN_GAP for the reel's
+     first shot) or TAIL_MAX s after its last (not the last shot, which may hold a look): FAIL with the point to use.
+     A delivered reel kept the host's breaths and the reach to press record. "hold_ok": true keeps a hold on purpose.
   8. notes: a cut point inside continuous sound (a word may be clipped: the nearest silence is printed) and words
      heard inside the shot before the line's first / after its last word (a false start let in, or Whisper inventing
      a word at a cut).
@@ -255,7 +256,14 @@ def clipped(missing, heard, side, cut):
     return out[::-1] if side == 'lead' else out
 
 
-OPEN_GAP = .45   # silence before the reel's first word that reads as a dead start
+OPEN_GAP = .25   # the reel's first shot: before its first word (a hook starts on it)
+LEAD_MAX = .3    # any shot: before its first word (a breath, a reach to press record)
+TAIL_MAX = .45   # any shot but the last: after its last word
+
+
+def trailing_gap(heard, cut):
+    """seconds between a shot's last heard word and its out-point"""
+    return round(max(0.0, cut - heard[-1][2]), 3) if heard else 0.0
 
 
 def opening_gap(heard, cut):
@@ -485,10 +493,16 @@ def run(proj, edl_path=None, model='small.en', quiet=False):
                 failed.add(side)
                 msgs.append(f"the in-point {cut:.2f} cuts the opening 's' sound of {word!r} (a hiss at {hs[0]:.2f}-{hs[1]:.2f}): "
                             f"start at {max(0, hs[0] - .03):.2f}")
-        gap = opening_gap(inside, seg['in']) if seg is edl[0] else 0.0
-        if gap > OPEN_GAP and not seg.get('hold_ok'):
-            msgs.append(f"the reel opens on {gap:.2f}s of silence before {inside[0][0]!r} (heard from {inside[0][1]:.2f}): a hook starts "
-                        f"on its first word, start at {max(0, inside[0][1] - .07):.2f} (or add \"hold_ok\": true for a held look on purpose)")
+        # a shot holds the host speaking, nothing else: no breath or reach before the first word, no lingering after the
+        # last (a delivered reel kept the host's breaths and the reach to press record)
+        gap = opening_gap(inside, seg['in'])
+        if gap > (OPEN_GAP if seg is edl[0] else LEAD_MAX) and not seg.get('hold_ok'):
+            msgs.append(f"the shot keeps {gap:.2f}s before {inside[0][0]!r} (a breath, a pause, a reach to the phone; heard from "
+                        f"{inside[0][1]:.2f}): start at {max(0, inside[0][1] - .07):.2f} (\"hold_ok\": true keeps it on purpose)")
+        tail = trailing_gap(inside, seg['out'])
+        if tail > TAIL_MAX and seg is not edl[-1] and not seg.get('hold_ok'):
+            msgs.append(f"the shot keeps {tail:.2f}s after {inside[-1][0]!r} (heard to {inside[-1][2]:.2f}): end at "
+                        f"{inside[-1][2] + .12:.2f} (\"hold_ok\": true keeps a held look on purpose)")
         misses = near_misses(words, [h[0] for h in inside], seg.get('heard_ok', ()))
         if misses:   # the last letter is where Whisper is least sure: medium.en must hear it the same way
             again = {norm(a) for a, _ in near_misses(words, [h[0] for h in ears.hear(x, seg['in'], seg['out'], 'medium.en')],

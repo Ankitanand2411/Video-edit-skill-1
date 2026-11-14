@@ -64,16 +64,33 @@ one graphic; a "Transition Graphic:" line changes the graphic before it). Kinds,
 - LOOK at `PY storyboard_plan.py` output: every graphic's beat times, the coverage list, the unused folder pictures.
   Change a time or a text in storyboard_plan.json when a beat is on the wrong word; the build follows it.
 
+## Brand (every video)
+storyboard.py reads the brand from the storyboard (its title, BRAND cell, CTA, file name): "Afterschool" or "School
+Advisor" ("SA News", "Follow School Advisor"). Its text boxes carry the brand: SUPER plates, labels and the closing
+frame's button. Afterschool: purple box #413370 (its brand pack's primary_deep, for boxes and buttons), white text.
+School Advisor: royal blue box #113DA5 (its 60% blue family), white text. No brand found: the look's own plates; set
+`BRAND` in build.py's CONTENT (or "brand" in storyboard.json) when the storyboard does not say.
+
 ## On-screen text follows the storyboard (every video)
 The storyboard is the source of truth for every word on screen:
-- Captions: build.py aligns the spoken words to the SCRIPT (in order, spelling-blind) and shows each matched word as
-  the script writes it: capitals ("Sounds like", "Malaysia's former Deputy Police Chief", "MCMC"), spelling
-  ("radicalization" when the script says so), numbers ("100,000"). Words the script does not have show as the EDL line
-  writes them. The under-16 reel: 240 of 267 spoken words matched. A lower-case look no longer lowercases a storyboard
+- Captions: sentence case with their punctuation (a capital where a sentence starts, its commas and full stops).
+  build.py aligns the spoken words to the SCRIPT (in order, spelling-blind) and shows each matched word as the script
+  writes it, with its punctuation: capitals ("Sounds like", "Malaysia's former Deputy Police Chief", "MCMC"), spelling
+  ("radicalization" when the script says so), numbers ("100,000"). A slip of a word or two inside a scripted sentence
+  takes the script's words ("over there" said, "over this" written: the script's grammar; build.py prints each one).
+  Words the script does not have show as the EDL line writes them. The takes follow the script's order of talking
+  points. The under-16 reel: 240 of 267 spoken words matched. A lower-case look no longer lowercases a storyboard
   reel; an all-caps look (cool dude captions) stays all caps.
 - SUPERs, split labels, badges, banners, steps, stat labels, place names and the closing frame: exactly as written
   (the plates drop the wide caps tracking when the SUPER is in mixed case). Emojis become icons, em dashes commas.
-- PUNCH words in storyboard mode show the script's form of their words; build.py flags one that does not.
+- PUNCH words come from the storyboard: a phrase of its SUPERs or quoted VISUALS said in the shot ("classroom hours",
+  "resident tutors", "1843") is the shot's punch word; otherwise the strongest name, number or noun of the line, never a
+  vague word ("interesting", "genuine", "simply"). They show the script's form; build.py flags one that does not.
+- Picture animations follow the VISUALS: "slides in from the left / right", "drops in from the top", "pops", "fades
+  in", "flips", "slow zoom in / Ken Burns / push in", "zoom out / pull back" (storyboard_plan.py "anim"; a zoom never
+  takes a picture past its own size).
+- SUPER plates: no blur or stretch on their words (a highlighted step that blurred read as the plate glitching); a
+  step lights up by colour only.
 - MOOD: "Vibrant / bright" lifts saturation and brightness a touch, "moody / dark / serious" lowers them; its pace sets
   the breath between sentences in the cut.
 
@@ -118,10 +135,9 @@ The storyboard is the source of truth for every word on screen:
 - End card: picture card at y 290, lines below it in the look's punch font, the last line italic accent.
 
 ## Mood
-- "Pace: Medium": sentences get a short breath between them (~0.3-0.5s: the out-point ~0.25s after a sentence's last
-  word, the next in-point ~0.07s before its first); "fast" trims to ~0.15s, "slow" lets ~0.7s through. A reel never
-  opens on silence (check_edl.py fails a first shot with more than 0.45s before its first word). "2 min": the length
-  the cut lands on is what it is (the under-16 reel: 1:58 + the end card).
+- A shot holds the host speaking and nothing else: no breath before the first word, no reach to the phone, no pause
+  after the last word (check_edl.py fails more than 0.3s before / 0.45s after; the reel's first shot 0.25s). The pace
+  comes from the shots, never from kept silence. "2 min": the length the cut lands on is what it is.
 - "Vibrant / inspirational" with the cool dude look: keep the editorial grade but lift it (room brightness
   .80 -> .86, saturation .84 -> .92, subject saturation .86 -> .98); the warm pictures carry the colour.
 - "Music": the skill has no music library. Ask the user for a track (royalty-free, theirs to use) and save it as
